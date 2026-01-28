@@ -13,8 +13,6 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.config import settings
-
 
 @dataclass
 class SimpleFINAccount:

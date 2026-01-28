@@ -1,21 +1,18 @@
 """Tests for API endpoints."""
 
-import json
 import os
 import time
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Set test encryption key before importing app modules
 os.environ["ENCRYPTION_KEY"] = "eBKqFlbjULz6MZKcre8TswaoEFBrG8pGBmFXlOT6MOs="
 
-from app.main import app
-from app.models import Account, Base, Credential, SyncLog, Transaction
 from app.database import get_db
-from app.encryption import encrypt
+from app.main import app
+from app.models import Account, Base, SyncLog, Transaction
 
 
 @pytest.fixture
