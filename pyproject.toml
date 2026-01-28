@@ -1,0 +1,129 @@
+[project]
+name = "finance-planner"
+version = "0.1.0"
+description = "Personal finance app with SimpleFIN sync"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.14.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "cryptography>=43.0.0",
+    "httpx>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8",
+    "basedpyright>=1.36.2",
+    "pre-commit>=3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    # Core
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+
+    # Bug detection
+    "B",      # flake8-bugbear (catches real bugs)
+    "A",      # flake8-builtins (shadowed builtins)
+    "RUF",    # Ruff-specific rules
+
+    # Code quality
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "PIE",    # flake8-pie
+    "RET",    # flake8-return
+    "PERF",   # Perflint
+
+    # Imports
+    "FA",     # flake8-future-annotations
+    "ISC",    # flake8-implicit-str-concat
+    "ICN",    # flake8-import-conventions
+    "TID",    # flake8-tidy-imports
+    "TC",     # flake8-type-checking
+
+    # Specific
+    "T20",    # flake8-print
+    "PTH",    # flake8-use-pathlib
+]
+ignore = [
+    # Performance (sometimes clearer as-is)
+    "PERF203",  # try-except in loop
+
+    # Style preferences (often less readable "fixed")
+    "SIM102",   # combine nested if
+    "SIM103",   # return condition directly
+    "SIM108",   # ternary operator
+    "SIM117",   # combine with statements
+
+    # Type checking imports (too much churn for little benefit)
+    "TC001",    # move app import to TYPE_CHECKING
+    "TC002",    # move third-party import to TYPE_CHECKING
+    "TC003",    # move stdlib import to TYPE_CHECKING
+    "TC004",    # move import out of TYPE_CHECKING
+
+    # Returns (often clearer with assignment)
+    "RET504",   # unnecessary assignment before return
+
+    # Line length (fix incrementally)
+    "E501",     # line too long
+
+    # Conflicts with formatter
+    "ISC001",   # single-line-implicit-string-concatenation
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "T20", "E501", "F841"]  # assert False, print(), long lines, unused vars
+"alembic/*" = ["E501", "F401"]  # long lines, unused imports in migrations
+
+[tool.basedpyright]
+pythonVersion = "3.11"
+include = ["app"]
+exclude = ["tests", "alembic", "**/__pycache__"]
+typeCheckingMode = "recommended"
+failOnWarnings = false
+
+# Untyped packages (no py.typed marker)
+reportMissingTypeStubs = false
+
+# Let ruff handle these
+reportUnusedImport = false
+reportUnusedVariable = false
+
+# Third-party libs have incomplete type stubs
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+
+# FastAPI patterns intentionally ignore return values
+reportUnusedCallResult = false
+
+# Dynamic data uses dict[str, Any] intentionally
+reportExplicitAny = false

@@ -1,0 +1,67 @@
+{
+  "accounts": [
+    {
+      "id": "ACT_001",
+      "org": {
+        "domain": "chase.com",
+        "name": "Chase"
+      },
+      "name": "Chase Checking",
+      "currency": "USD",
+      "balance": "1234.56",
+      "available-balance": "1200.00",
+      "balance-date": 1704067200,
+      "transactions": [
+        {
+          "id": "TXN_001",
+          "posted": 1704067200,
+          "amount": "-50.00",
+          "description": "AMAZON.COM",
+          "pending": false
+        },
+        {
+          "id": "TXN_002",
+          "posted": 1704153600,
+          "amount": "-25.50",
+          "description": "STARBUCKS",
+          "pending": false
+        },
+        {
+          "id": "TXN_003",
+          "posted": 1704240000,
+          "amount": "1500.00",
+          "description": "PAYROLL DEPOSIT",
+          "pending": false
+        }
+      ]
+    },
+    {
+      "id": "ACT_002",
+      "org": {
+        "domain": "amex.com",
+        "name": "American Express"
+      },
+      "name": "Amex Platinum",
+      "currency": "USD",
+      "balance": "-500.00",
+      "available-balance": null,
+      "balance-date": 1704067200,
+      "transactions": [
+        {
+          "id": "TXN_004",
+          "posted": 1704067200,
+          "amount": "-200.00",
+          "description": "RESTAURANT ABC",
+          "pending": false
+        },
+        {
+          "id": "TXN_005",
+          "posted": 1704153600,
+          "amount": "-300.00",
+          "description": "GAS STATION",
+          "pending": true
+        }
+      ]
+    }
+  ]
+}
