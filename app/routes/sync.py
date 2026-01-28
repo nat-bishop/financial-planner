@@ -2,7 +2,7 @@ import json
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,10 +39,10 @@ async def setup_credentials(
     try:
         # Claim the access URL from SimpleFIN
         access_url = await SimpleFINClient.claim_token(data.setup_token)
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to claim SimpleFIN token: {e}",
+            detail="Failed to claim SimpleFIN token. Please check your setup token and try again.",
         )
 
     # Encrypt and store
@@ -96,7 +96,7 @@ async def trigger_sync(
 
 @router.get("/history", response_model=list[SyncResponse])
 async def get_sync_history(
-    limit: int = 10,
+    limit: int = Query(default=10, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> list[SyncLog]:
     """Get sync operation history."""

@@ -62,8 +62,7 @@ async def sync_accounts(
         response = await client.fetch_accounts(start_date=start_date, end_date=end_date)
         sync_log.raw_response = response.raw_json
 
-        transactions_added = 0
-        transactions_updated = 0
+        transactions_synced = 0
 
         for sf_account in response.accounts:
             # Upsert account
@@ -71,15 +70,12 @@ async def sync_accounts(
 
             # Upsert transactions
             for tx in sf_account.transactions:
-                was_updated = await _upsert_transaction(db, sf_account.id, tx)
-                if was_updated:
-                    transactions_updated += 1
-                else:
-                    transactions_added += 1
+                await _upsert_transaction(db, sf_account.id, tx)
+                transactions_synced += 1
 
         sync_log.accounts_synced = len(response.accounts)
-        sync_log.transactions_added = transactions_added
-        sync_log.transactions_updated = transactions_updated
+        sync_log.transactions_added = transactions_synced
+        sync_log.transactions_updated = 0
         sync_log.status = "success"
         sync_log.completed_at = int(time.time())
 
@@ -87,6 +83,7 @@ async def sync_accounts(
         sync_log.status = "failed"
         sync_log.error_message = str(e)
         sync_log.completed_at = int(time.time())
+        await db.commit()  # Ensure failure is recorded before re-raising
         raise
 
     return sync_log
@@ -126,27 +123,16 @@ async def _upsert_account(db: AsyncSession, sf_account) -> None:
     await db.execute(stmt)
 
 
-async def _upsert_transaction(db: AsyncSession, account_id: str, tx: dict) -> bool:
-    """Insert or update a transaction from SimpleFIN data.
-
-    Returns True if the transaction was updated (existed), False if it was inserted (new).
-    """
+async def _upsert_transaction(db: AsyncSession, account_id: str, tx: dict) -> None:
+    """Insert or update a transaction from SimpleFIN data."""
     now = int(time.time())
 
     # SimpleFIN transaction format
     external_id = tx.get("id")
     posted_at = tx.get("posted", 0)
-    amount = _to_cents(tx.get("amount", 0))
+    amount = _to_cents(tx.get("amount")) or 0
     description = tx.get("description", "")
     is_pending = tx.get("pending", False)
-
-    # Check if transaction exists
-    existing = await db.scalar(
-        select(Transaction).where(
-            Transaction.account_id == account_id,
-            Transaction.external_id == external_id,
-        )
-    )
 
     stmt = insert(Transaction).values(
         account_id=account_id,
@@ -172,4 +158,3 @@ async def _upsert_transaction(db: AsyncSession, account_id: str, tx: dict) -> bo
     )
 
     await db.execute(stmt)
-    return existing is not None

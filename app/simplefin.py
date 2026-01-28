@@ -50,7 +50,7 @@ class SimpleFINClient:
         # Decode the base64 setup token to get the claim URL
         claim_url = base64.b64decode(setup_token).decode("utf-8")
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(claim_url)
             response.raise_for_status()
             # The response body is the access URL
@@ -77,7 +77,7 @@ class SimpleFINClient:
         if end_date is not None:
             params["end-date"] = str(end_date)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(accounts_url, params=params)
             response.raise_for_status()
 

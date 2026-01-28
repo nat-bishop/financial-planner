@@ -17,6 +17,12 @@ def get_fernet() -> Fernet:
     return _fernet
 
 
+def reset_fernet() -> None:
+    """Reset cached Fernet instance. Used for testing with different keys."""
+    global _fernet
+    _fernet = None
+
+
 def encrypt(data: str) -> str:
     """Encrypt a string using Fernet symmetric encryption."""
     return get_fernet().encrypt(data.encode()).decode()
