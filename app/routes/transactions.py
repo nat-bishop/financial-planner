@@ -15,6 +15,7 @@ router = APIRouter()
 async def list_transactions(
     account_id: str | None = None,
     category: str | None = None,
+    search: str | None = None,
     start_date: int | None = None,
     end_date: int | None = None,
     limit: int = Query(default=100, le=1000),
@@ -26,6 +27,7 @@ async def list_transactions(
     Args:
         account_id: Filter by account ID
         category: Filter by category
+        search: Search description (LIKE %query%)
         start_date: Filter by posted_at >= start_date (Unix timestamp)
         end_date: Filter by posted_at <= end_date (Unix timestamp)
         limit: Maximum number of results (default 100)
@@ -37,6 +39,8 @@ async def list_transactions(
         query = query.where(Transaction.account_id == account_id)
     if category:
         query = query.where(Transaction.category == category)
+    if search:
+        query = query.where(Transaction.description.ilike(f"%{search}%"))
     if start_date is not None:
         query = query.where(Transaction.posted_at >= start_date)
     if end_date is not None:

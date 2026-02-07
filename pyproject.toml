@@ -12,7 +12,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "cryptography>=43.0.0",
-    "httpx>=0.28.0",
     "plaid-python>=25.0.0",
 ]
 
@@ -76,6 +75,9 @@ select = [
     "PTH",    # flake8-use-pathlib
 ]
 ignore = [
+    # FastAPI uses Depends() in argument defaults (standard pattern)
+    "B008",
+
     # Performance (sometimes clearer as-is)
     "PERF203",  # try-except in loop
 

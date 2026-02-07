@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: 'Instrument Serif', serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+
+  --color-surface-0: #0a0a0a;
+  --color-surface-50: #111111;
+  --color-surface-100: #1a1a1a;
+  --color-surface-200: #2a2a2a;
+  --color-surface-300: #3a3a3a;
+  --color-surface-400: #555555;
+  --color-surface-500: #777777;
+  --color-surface-600: #999999;
+  --color-surface-700: #bbbbbb;
+  --color-surface-800: #dddddd;
+  --color-surface-900: #f0f0f0;
+  --color-surface-950: #fafafa;
+
+  --color-accent: #c8ff00;
+  --color-accent-dim: #8ab300;
+  --color-expense: #ff4d4d;
+  --color-income: #00d68f;
+  --color-pending: #ffb84d;
+  --color-info: #4da6ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-body);
+  background: var(--color-surface-950);
+  color: var(--color-surface-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-300);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-400);
+}
+
+/* Page entry animation */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.4s ease-out both;
+}
+
+/* Stagger children */
+.stagger-children > * {
+  animation: fadeUp 0.35s ease-out both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 360ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 420ms; }

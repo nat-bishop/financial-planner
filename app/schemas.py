@@ -59,6 +59,11 @@ class TransactionUpdate(BaseModel):
     notes: str | None = None
 
 
+# Link Token
+class LinkTokenResponse(BaseModel):
+    link_token: str
+
+
 # Sync
 class SyncResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

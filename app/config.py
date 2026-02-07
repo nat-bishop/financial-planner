@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     # Encryption key for credentials (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     encryption_key: str = ""
 
+    # CORS
+    cors_origins: list[str] = ["http://localhost:5173"]
+
     # Plaid
     plaid_client_id: str = ""
     plaid_secret: str = ""

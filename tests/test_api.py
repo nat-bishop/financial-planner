@@ -1,58 +1,13 @@
 """Tests for API endpoints."""
 
-import os
+import json
 import time
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-# Set test encryption key before importing app modules
-os.environ["ENCRYPTION_KEY"] = "eBKqFlbjULz6MZKcre8TswaoEFBrG8pGBmFXlOT6MOs="
-
-from app.database import get_db
-from app.main import app
-from app.models import Account, Base, SyncLog, Transaction
-
-
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
-@pytest.fixture
-async def test_db():
-    """Create an in-memory SQLite database for testing."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-
-    async with async_session() as session:
-        yield session
-
-    await engine.dispose()
-
-
-@pytest.fixture
-async def client(test_db):
-    """Create test client with overridden database dependency."""
-
-    async def override_get_db():
-        yield test_db
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        yield ac
-
-    app.dependency_overrides.clear()
+from app.encryption import encrypt
+from app.models import Account, Credential, SyncLog, Transaction
 
 
 class TestHealthEndpoint:
@@ -67,9 +22,8 @@ class TestHealthEndpoint:
         assert data["last_sync_at"] is None
 
     @pytest.mark.asyncio
-    async def test_health_shows_last_sync(self, client, test_db):
+    async def test_health_shows_last_sync(self, client, db):
         """Health endpoint shows last sync info."""
-        # Create a sync log
         sync_log = SyncLog(
             started_at=int(time.time()),
             completed_at=int(time.time()),
@@ -77,8 +31,8 @@ class TestHealthEndpoint:
             accounts_synced=2,
             transactions_added=10,
         )
-        test_db.add(sync_log)
-        await test_db.commit()
+        db.add(sync_log)
+        await db.commit()
 
         response = await client.get("/health")
         data = response.json()
@@ -95,7 +49,7 @@ class TestAccountsEndpoint:
         assert response.json() == []
 
     @pytest.mark.asyncio
-    async def test_list_accounts(self, client, test_db):
+    async def test_list_accounts(self, client, db):
         """List accounts returns all accounts."""
         account = Account(
             id="act_1",
@@ -105,8 +59,8 @@ class TestAccountsEndpoint:
             name="Chase Checking",
             balance_current=123456,
         )
-        test_db.add(account)
-        await test_db.commit()
+        db.add(account)
+        await db.commit()
 
         response = await client.get("/accounts/")
         assert response.status_code == 200
@@ -116,7 +70,31 @@ class TestAccountsEndpoint:
         assert data[0]["name"] == "Chase Checking"
 
     @pytest.mark.asyncio
-    async def test_get_account(self, client, test_db):
+    async def test_list_accounts_pagination(self, client, db):
+        """List accounts supports limit and offset."""
+        for i in range(5):
+            db.add(Account(
+                id=f"act_{i}",
+                provider="plaid",
+                org_domain=None,
+                name=f"Account {i}",
+            ))
+        await db.commit()
+
+        # Default returns all
+        response = await client.get("/accounts/")
+        assert len(response.json()) == 5
+
+        # With limit
+        response = await client.get("/accounts/", params={"limit": 2})
+        assert len(response.json()) == 2
+
+        # With offset
+        response = await client.get("/accounts/", params={"limit": 2, "offset": 3})
+        assert len(response.json()) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_account(self, client, db):
         """Get specific account by ID."""
         account = Account(
             id="act_1",
@@ -124,8 +102,8 @@ class TestAccountsEndpoint:
             org_domain=None,
             name="Chase Checking",
         )
-        test_db.add(account)
-        await test_db.commit()
+        db.add(account)
+        await db.commit()
 
         response = await client.get("/accounts/act_1")
         assert response.status_code == 200
@@ -140,7 +118,7 @@ class TestAccountsEndpoint:
 
 class TestTransactionsEndpoint:
     @pytest.mark.asyncio
-    async def test_list_transactions(self, client, test_db):
+    async def test_list_transactions(self, client, db):
         """List transactions with filters."""
         account = Account(
             id="act_1",
@@ -148,7 +126,7 @@ class TestTransactionsEndpoint:
             org_domain=None,
             name="Test Account",
         )
-        test_db.add(account)
+        db.add(account)
 
         now = int(time.time())
         tx1 = Transaction(
@@ -167,8 +145,8 @@ class TestTransactionsEndpoint:
             description="Groceries",
             category="Shopping",
         )
-        test_db.add_all([tx1, tx2])
-        await test_db.commit()
+        db.add_all([tx1, tx2])
+        await db.commit()
 
         # List all
         response = await client.get("/transactions/")
@@ -185,7 +163,48 @@ class TestTransactionsEndpoint:
         assert len(response.json()) == 2
 
     @pytest.mark.asyncio
-    async def test_update_transaction(self, client, test_db):
+    async def test_search_transactions(self, client, db):
+        """Search transactions by description."""
+        account = Account(
+            id="act_1",
+            provider="plaid",
+            org_domain=None,
+            name="Test Account",
+        )
+        db.add(account)
+
+        now = int(time.time())
+        db.add_all([
+            Transaction(
+                account_id="act_1", external_id="tx_1",
+                posted_at=now, amount=-5000, description="Starbucks Coffee",
+            ),
+            Transaction(
+                account_id="act_1", external_id="tx_2",
+                posted_at=now, amount=-10000, description="Amazon Purchase",
+            ),
+            Transaction(
+                account_id="act_1", external_id="tx_3",
+                posted_at=now, amount=-3000, description="Coffee Bean & Tea",
+            ),
+        ])
+        await db.commit()
+
+        # Search for "coffee" (case insensitive)
+        response = await client.get("/transactions/", params={"search": "coffee"})
+        assert response.status_code == 200
+        assert len(response.json()) == 2
+
+        # Search for "amazon"
+        response = await client.get("/transactions/", params={"search": "amazon"})
+        assert len(response.json()) == 1
+
+        # No results
+        response = await client.get("/transactions/", params={"search": "walmart"})
+        assert len(response.json()) == 0
+
+    @pytest.mark.asyncio
+    async def test_update_transaction(self, client, db):
         """Update transaction category and notes."""
         account = Account(
             id="act_1",
@@ -193,7 +212,7 @@ class TestTransactionsEndpoint:
             org_domain=None,
             name="Test Account",
         )
-        test_db.add(account)
+        db.add(account)
 
         tx = Transaction(
             account_id="act_1",
@@ -202,8 +221,8 @@ class TestTransactionsEndpoint:
             amount=-5000,
             description="Coffee",
         )
-        test_db.add(tx)
-        await test_db.commit()
+        db.add(tx)
+        await db.commit()
 
         response = await client.patch(
             f"/transactions/{tx.id}",
@@ -215,9 +234,117 @@ class TestTransactionsEndpoint:
         assert data["notes"] == "Morning coffee"
 
 
+class TestSyncEndpoints:
+    @pytest.mark.asyncio
+    async def test_sandbox_token_creates_credentials(self, client, db):
+        """POST /sync/sandbox-token creates credentials via mock PlaidClient."""
+        with patch("app.routes.sync.PlaidClient") as MockPlaidClient:
+            mock_client = MockPlaidClient.return_value
+            mock_client.create_sandbox_public_token = AsyncMock(return_value="public-sandbox-token")
+            mock_client.exchange_public_token = AsyncMock(return_value=("access-sandbox-123", "item-123"))
+
+            response = await client.post("/sync/sandbox-token")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"] == "plaid"
+        assert "id" in data
+
+    @pytest.mark.asyncio
+    async def test_exchange_token_creates_credentials(self, client, db):
+        """POST /sync/credentials exchanges public token for access credentials."""
+        with patch("app.routes.sync.PlaidClient") as MockPlaidClient:
+            mock_client = MockPlaidClient.return_value
+            mock_client.exchange_public_token = AsyncMock(return_value=("access-test-123", "item-test-123"))
+
+            response = await client.post(
+                "/sync/credentials",
+                json={"public_token": "public-test-token"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"] == "plaid"
+
+    @pytest.mark.asyncio
+    async def test_exchange_token_rejects_duplicate(self, client, db):
+        """POST /sync/credentials rejects when credentials already exist."""
+        # Create existing credential
+        cred = Credential(
+            id="cred_1",
+            provider="plaid",
+            encrypted_data=encrypt(json.dumps({"access_token": "test", "item_id": "test"})),
+        )
+        db.add(cred)
+        await db.commit()
+
+        response = await client.post(
+            "/sync/credentials",
+            json={"public_token": "public-test-token"},
+        )
+        assert response.status_code == 400
+        assert "already configured" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync(self, client, db):
+        """POST /sync/ triggers sync and returns SyncLog."""
+        with patch("app.routes.sync.sync_accounts") as mock_sync:
+            sync_log = SyncLog(
+                started_at=int(time.time()),
+                completed_at=int(time.time()),
+                status="success",
+                accounts_synced=2,
+                transactions_added=10,
+                transactions_updated=0,
+            )
+            db.add(sync_log)
+            await db.flush()
+            mock_sync.return_value = sync_log
+
+            response = await client.post("/sync/")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["accounts_synced"] == 2
+        assert data["transactions_added"] == 10
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync_409_when_already_running(self, client, db):
+        """POST /sync/ returns 409 when sync already in progress."""
+        with patch("app.routes.sync.sync_accounts") as mock_sync:
+            mock_sync.side_effect = RuntimeError("Sync already in progress")
+
+            response = await client.post("/sync/")
+
+        assert response.status_code == 409
+        assert "already in progress" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_delete_credentials(self, client, db):
+        """DELETE /sync/credentials deletes stored credentials."""
+        cred = Credential(
+            id="cred_1",
+            provider="plaid",
+            encrypted_data=encrypt(json.dumps({"access_token": "test", "item_id": "test"})),
+        )
+        db.add(cred)
+        await db.commit()
+
+        response = await client.delete("/sync/credentials")
+        assert response.status_code == 200
+        assert response.json()["status"] == "deleted"
+
+    @pytest.mark.asyncio
+    async def test_delete_credentials_404_when_none(self, client):
+        """DELETE /sync/credentials returns 404 when no credentials exist."""
+        response = await client.delete("/sync/credentials")
+        assert response.status_code == 404
+
+
 class TestAnalyticsEndpoint:
     @pytest.mark.asyncio
-    async def test_spending_by_category(self, client, test_db):
+    async def test_spending_by_category(self, client, db):
         """Get spending grouped by category."""
         account = Account(
             id="act_1",
@@ -225,7 +352,7 @@ class TestAnalyticsEndpoint:
             org_domain=None,
             name="Test Account",
         )
-        test_db.add(account)
+        db.add(account)
 
         now = int(time.time())
         transactions = [
@@ -262,8 +389,8 @@ class TestAnalyticsEndpoint:
                 category="Income",
             ),
         ]
-        test_db.add_all(transactions)
-        await test_db.commit()
+        db.add_all(transactions)
+        await db.commit()
 
         response = await client.get("/analytics/spending-by-category")
         assert response.status_code == 200

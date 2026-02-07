@@ -13,6 +13,7 @@ to avoid blocking the FastAPI event loop.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -240,7 +241,7 @@ class PlaidClient:
         removed = [tx.transaction_id for tx in response.removed]
 
         # Build raw JSON for logging (simplified representation)
-        raw_json = str({
+        raw_json = json.dumps({
             "accounts_count": len(accounts),
             "added_count": len(added),
             "modified_count": len(modified),

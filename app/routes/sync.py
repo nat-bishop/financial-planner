@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import uuid
 
@@ -11,7 +12,15 @@ from app.database import get_db
 from app.encryption import encrypt
 from app.models import Credential, SyncLog
 from app.plaid import PlaidClient
-from app.schemas import CredentialResponse, SyncResponse
+from app.schemas import (
+    CredentialCreate,
+    CredentialResponse,
+    LinkTokenResponse,
+    SyncResponse,
+)
+from app.sync import sync_accounts
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -76,8 +85,8 @@ async def create_sandbox_token(
     return credential
 
 
-@router.post("/link-token")
-async def create_link_token() -> dict:
+@router.post("/link-token", response_model=LinkTokenResponse)
+async def create_link_token() -> LinkTokenResponse:
     """Create a Plaid Link token for frontend use.
 
     Use this token with Plaid Link in your frontend to initiate
@@ -94,12 +103,12 @@ async def create_link_token() -> dict:
             detail=f"Failed to create link token: {e}",
         ) from None
 
-    return {"link_token": link_token}
+    return LinkTokenResponse(link_token=link_token)
 
 
 @router.post("/credentials", response_model=CredentialResponse)
 async def exchange_token(
-    public_token: str,
+    data: CredentialCreate,
     db: AsyncSession = Depends(get_db),
 ) -> Credential:
     """Exchange a Plaid public_token for access credentials.
@@ -120,7 +129,7 @@ async def exchange_token(
     client = PlaidClient()
 
     try:
-        access_token, item_id = await client.exchange_public_token(public_token)
+        access_token, item_id = await client.exchange_public_token(data.public_token)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -169,11 +178,11 @@ async def trigger_sync(
     Returns:
         SyncLog with results
     """
-    from app.sync import sync_accounts
-
     try:
         sync_log = await sync_accounts(db)
         return sync_log
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from None
 

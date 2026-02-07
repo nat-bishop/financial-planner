@@ -1,6 +1,8 @@
 """Sync orchestration for Plaid data."""
 
+import asyncio
 import json
+import logging
 import time
 
 from sqlalchemy import delete, select
@@ -10,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.encryption import decrypt
 from app.models import Account, Credential, SyncLog, Transaction
 from app.plaid import PlaidAccount, PlaidClient, PlaidTransaction
+
+log = logging.getLogger(__name__)
+
+_sync_lock = asyncio.Lock()
 
 
 async def get_plaid_credential(db: AsyncSession) -> Credential | None:
@@ -25,7 +31,18 @@ async def sync_accounts(db: AsyncSession) -> SyncLog:
 
     Returns:
         SyncLog with results
+
+    Raises:
+        RuntimeError: If a sync is already in progress
     """
+    if _sync_lock.locked():
+        raise RuntimeError("Sync already in progress")
+
+    async with _sync_lock:
+        return await _sync_accounts_inner(db)
+
+
+async def _sync_accounts_inner(db: AsyncSession) -> SyncLog:
     now = int(time.time())
 
     # Create sync log entry
@@ -33,9 +50,12 @@ async def sync_accounts(db: AsyncSession) -> SyncLog:
     db.add(sync_log)
     await db.flush()
 
+    log.info("Sync started")
+
     try:
         credential = await get_plaid_credential(db)
         if not credential:
+            log.warning("Sync failed: no credentials configured")
             sync_log.status = "failed"
             sync_log.error_message = "No Plaid credentials configured"
             sync_log.completed_at = int(time.time())
@@ -95,7 +115,13 @@ async def sync_accounts(db: AsyncSession) -> SyncLog:
         sync_log.completed_at = int(time.time())
         sync_log.raw_response = json.dumps(raw_responses)
 
+        log.info(
+            "Sync complete: %d accounts, %d added, %d updated, %d removed",
+            len(accounts_synced), transactions_added, transactions_updated, transactions_removed,
+        )
+
     except Exception as e:
+        log.error("Sync failed: %s", e)
         sync_log.status = "failed"
         sync_log.error_message = str(e)
         sync_log.completed_at = int(time.time())

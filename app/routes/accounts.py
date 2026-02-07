@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,9 +10,15 @@ router = APIRouter()
 
 
 @router.get("/", response_model=list[AccountResponse])
-async def list_accounts(db: AsyncSession = Depends(get_db)) -> list[Account]:
+async def list_accounts(
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[Account]:
     """List all synced accounts."""
-    result = await db.scalars(select(Account).order_by(Account.name))
+    result = await db.scalars(
+        select(Account).order_by(Account.name).offset(offset).limit(limit)
+    )
     return list(result.all())
 
 
