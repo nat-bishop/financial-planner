@@ -8,6 +8,7 @@ export const useSyncStore = defineStore('sync', () => {
   const lastSync = ref<SyncLog | null>(null)
   const health = ref<HealthResponse | null>(null)
   const error = ref<string | null>(null)
+  const claiming = ref(false)
 
   async function triggerSync(): Promise<SyncLog | null> {
     const api = useApi()
@@ -25,15 +26,19 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
-  async function createSandboxToken(): Promise<boolean> {
+  async function claimSetupToken(setupToken: string): Promise<boolean> {
     const api = useApi()
+    claiming.value = true
     error.value = null
     try {
-      await api.post('/sync/sandbox-token')
+      await api.post('/sync/credentials', { setup_token: setupToken })
+      await triggerSync()
       return true
     } catch (e: any) {
       error.value = e.message
       return false
+    } finally {
+      claiming.value = false
     }
   }
 
@@ -46,5 +51,8 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
-  return { syncing, lastSync, health, error, triggerSync, createSandboxToken, fetchHealth }
+  return {
+    syncing, lastSync, health, error, claiming,
+    triggerSync, claimSetupToken, fetchHealth,
+  }
 })

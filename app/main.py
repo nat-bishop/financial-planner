@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -6,29 +7,38 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine
-from app.models import Base
 from app.routes import router
+
+log = logging.getLogger(__name__)
+
+
+def _run_migrations() -> None:
+    """Run Alembic migrations to head on startup."""
+    from alembic import command  # noqa: I001
+    from alembic.config import Config
+
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(alembic_cfg, "head")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure data directory exists
+    import asyncio
+
     Path("data").mkdir(parents=True, exist_ok=True)
-
-    # Create tables if they don't exist (for development)
-    # In production, use alembic migrations
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
+    try:
+        # Run in thread — alembic env.py calls asyncio.run() which needs its own loop
+        await asyncio.to_thread(_run_migrations)
+    except Exception:
+        log.warning("Auto-migration skipped (alembic.ini not found or error)")
     yield
-
-    # Cleanup
     await engine.dispose()
 
 
 app = FastAPI(
     title="Finance Planner",
-    description="Personal finance app with Plaid sync",
+    description="Personal finance app with SimpleFIN sync",
     version="0.1.0",
     lifespan=lifespan,
 )

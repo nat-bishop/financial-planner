@@ -1,0 +1,33 @@
+{
+  "errors": ["Rate limit warning: 20 of 24 requests used today"],
+  "accounts": [
+    {
+      "id": "ACT_001",
+      "name": "My Checking",
+      "currency": "USD",
+      "balance": "1100.00",
+      "available-balance": "1050.00",
+      "balance-date": 1705449600,
+      "org": {
+        "name": "First Bank",
+        "domain": "firstbank.com"
+      },
+      "transactions": [
+        {
+          "id": "TXN_003",
+          "posted": 1705276800,
+          "amount": "-75.50",
+          "description": "Restaurant",
+          "pending": false
+        },
+        {
+          "id": "TXN_004",
+          "posted": 1705363200,
+          "amount": "-25.00",
+          "description": "Coffee Shop",
+          "pending": false
+        }
+      ]
+    }
+  ]
+}

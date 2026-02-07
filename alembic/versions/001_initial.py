@@ -24,6 +24,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("provider", sa.String(), nullable=False),
         sa.Column("encrypted_data", sa.Text(), nullable=False),
+        sa.Column("sync_cursor", sa.String(), nullable=True),
         sa.Column("created_at", sa.Integer(), nullable=False),
         sa.Column("updated_at", sa.Integer(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
@@ -34,8 +35,7 @@ def upgrade() -> None:
     op.create_table(
         "accounts",
         sa.Column("id", sa.String(), nullable=False),
-        sa.Column("provider", sa.String(), nullable=False, server_default="simplefin"),
-        sa.Column("org_domain", sa.String(), nullable=False),
+        sa.Column("provider", sa.String(), nullable=False, server_default="plaid"),
         sa.Column("org_name", sa.String(), nullable=True),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("account_type", sa.String(), nullable=True),
@@ -75,19 +75,6 @@ def upgrade() -> None:
     op.create_index("idx_transactions_posted", "transactions", ["posted_at"])
     op.create_index("idx_transactions_category", "transactions", ["category"])
 
-    # Category rules table
-    op.create_table(
-        "category_rules",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("pattern", sa.String(), nullable=False),
-        sa.Column("category", sa.String(), nullable=False),
-        sa.Column("subcategory", sa.String(), nullable=True),
-        sa.Column("confidence", sa.Float(), nullable=False, server_default="1.0"),
-        sa.Column("source", sa.String(), nullable=False, server_default="manual"),
-        sa.Column("created_at", sa.Integer(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-
     # Sync log table
     op.create_table(
         "sync_log",
@@ -110,7 +97,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("sync_log")
-    op.drop_table("category_rules")
     op.drop_index("idx_transactions_category", table_name="transactions")
     op.drop_index("idx_transactions_posted", table_name="transactions")
     op.drop_index("idx_transactions_account_date", table_name="transactions")

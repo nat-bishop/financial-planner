@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 # Credentials
 class CredentialCreate(BaseModel):
-    public_token: str  # Plaid public token from Link
+    setup_token: str  # SimpleFIN setup token from bridge.simplefin.org
 
 
 class CredentialResponse(BaseModel):
@@ -21,7 +21,6 @@ class AccountResponse(BaseModel):
 
     id: str
     provider: str
-    org_domain: str | None
     org_name: str | None
     name: str
     account_type: str | None
@@ -57,11 +56,6 @@ class TransactionUpdate(BaseModel):
     subcategory: str | None = None
     tags: str | None = None  # JSON array as string
     notes: str | None = None
-
-
-# Link Token
-class LinkTokenResponse(BaseModel):
-    link_token: str
 
 
 # Sync

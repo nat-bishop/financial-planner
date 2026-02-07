@@ -17,10 +17,5 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
-    # Plaid
-    plaid_client_id: str = ""
-    plaid_secret: str = ""
-    plaid_environment: str = "sandbox"  # sandbox | development | production
-
 
 settings = Settings()

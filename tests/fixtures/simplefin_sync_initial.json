@@ -1,0 +1,52 @@
+{
+  "errors": [],
+  "accounts": [
+    {
+      "id": "ACT_001",
+      "name": "My Checking",
+      "currency": "USD",
+      "balance": "1234.56",
+      "available-balance": "1200.00",
+      "balance-date": 1705363200,
+      "org": {
+        "name": "First Bank",
+        "domain": "firstbank.com"
+      },
+      "transactions": [
+        {
+          "id": "TXN_001",
+          "posted": 1705276800,
+          "amount": "-50.00",
+          "description": "Amazon",
+          "pending": false
+        },
+        {
+          "id": "TXN_002",
+          "posted": 1705190400,
+          "amount": "1500.00",
+          "description": "PAYROLL",
+          "pending": false
+        },
+        {
+          "id": "TXN_003",
+          "posted": 0,
+          "amount": "-75.50",
+          "description": "Restaurant",
+          "pending": true
+        }
+      ]
+    },
+    {
+      "id": "ACT_002",
+      "name": "My Credit Card",
+      "currency": "USD",
+      "balance": "-500.00",
+      "available-balance": null,
+      "balance-date": 1705363200,
+      "org": {
+        "name": "First Bank"
+      },
+      "transactions": []
+    }
+  ]
+}

@@ -1,7 +1,6 @@
 export interface Account {
   id: string
   provider: string
-  org_domain: string | null
   org_name: string | null
   name: string
   account_type: string | null

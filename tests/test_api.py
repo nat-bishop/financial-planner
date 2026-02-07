@@ -53,8 +53,7 @@ class TestAccountsEndpoint:
         """List accounts returns all accounts."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             org_name="Chase",
             name="Chase Checking",
             balance_current=123456,
@@ -75,8 +74,7 @@ class TestAccountsEndpoint:
         for i in range(5):
             db.add(Account(
                 id=f"act_{i}",
-                provider="plaid",
-                org_domain=None,
+                provider="simplefin",
                 name=f"Account {i}",
             ))
         await db.commit()
@@ -98,8 +96,7 @@ class TestAccountsEndpoint:
         """Get specific account by ID."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Chase Checking",
         )
         db.add(account)
@@ -122,8 +119,7 @@ class TestTransactionsEndpoint:
         """List transactions with filters."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Test Account",
         )
         db.add(account)
@@ -167,8 +163,7 @@ class TestTransactionsEndpoint:
         """Search transactions by description."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Test Account",
         )
         db.add(account)
@@ -208,8 +203,7 @@ class TestTransactionsEndpoint:
         """Update transaction category and notes."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Test Account",
         )
         db.add(account)
@@ -236,51 +230,37 @@ class TestTransactionsEndpoint:
 
 class TestSyncEndpoints:
     @pytest.mark.asyncio
-    async def test_sandbox_token_creates_credentials(self, client, db):
-        """POST /sync/sandbox-token creates credentials via mock PlaidClient."""
-        with patch("app.routes.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.create_sandbox_public_token = AsyncMock(return_value="public-sandbox-token")
-            mock_client.exchange_public_token = AsyncMock(return_value=("access-sandbox-123", "item-123"))
-
-            response = await client.post("/sync/sandbox-token")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["provider"] == "plaid"
-        assert "id" in data
-
-    @pytest.mark.asyncio
-    async def test_exchange_token_creates_credentials(self, client, db):
-        """POST /sync/credentials exchanges public token for access credentials."""
-        with patch("app.routes.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.exchange_public_token = AsyncMock(return_value=("access-test-123", "item-test-123"))
+    async def test_claim_setup_token_creates_credentials(self, client, db):
+        """POST /sync/credentials claims setup token and stores credentials."""
+        with patch("app.routes.sync.SimpleFINClient") as MockClient:
+            MockClient.claim_setup_token = AsyncMock(
+                return_value="https://user:pass@bridge.simplefin.org/simplefin"
+            )
 
             response = await client.post(
                 "/sync/credentials",
-                json={"public_token": "public-test-token"},
+                json={"setup_token": "dGVzdC1jbGFpbS11cmw="},  # base64 of "test-claim-url"
             )
 
         assert response.status_code == 200
         data = response.json()
-        assert data["provider"] == "plaid"
+        assert data["provider"] == "simplefin"
+        assert "id" in data
 
     @pytest.mark.asyncio
-    async def test_exchange_token_rejects_duplicate(self, client, db):
+    async def test_claim_setup_token_rejects_duplicate(self, client, db):
         """POST /sync/credentials rejects when credentials already exist."""
-        # Create existing credential
         cred = Credential(
             id="cred_1",
-            provider="plaid",
-            encrypted_data=encrypt(json.dumps({"access_token": "test", "item_id": "test"})),
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({"access_url": "https://test@bridge.simplefin.org/simplefin"})),
         )
         db.add(cred)
         await db.commit()
 
         response = await client.post(
             "/sync/credentials",
-            json={"public_token": "public-test-token"},
+            json={"setup_token": "dGVzdC1jbGFpbS11cmw="},
         )
         assert response.status_code == 400
         assert "already configured" in response.json()["detail"]
@@ -321,12 +301,25 @@ class TestSyncEndpoints:
         assert "already in progress" in response.json()["detail"]
 
     @pytest.mark.asyncio
+    async def test_trigger_sync_429_when_too_soon(self, client, db):
+        """POST /sync/ returns 429 when synced too recently."""
+        with patch("app.routes.sync.sync_accounts") as mock_sync:
+            mock_sync.side_effect = RuntimeError(
+                "Too soon — SimpleFIN allows ~24 requests/day. Try again in 55 minutes."
+            )
+
+            response = await client.post("/sync/")
+
+        assert response.status_code == 429
+        assert "Too soon" in response.json()["detail"]
+
+    @pytest.mark.asyncio
     async def test_delete_credentials(self, client, db):
         """DELETE /sync/credentials deletes stored credentials."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
-            encrypted_data=encrypt(json.dumps({"access_token": "test", "item_id": "test"})),
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({"access_url": "https://test@bridge.simplefin.org/simplefin"})),
         )
         db.add(cred)
         await db.commit()
@@ -348,8 +341,7 @@ class TestAnalyticsEndpoint:
         """Get spending grouped by category."""
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Test Account",
         )
         db.add(account)

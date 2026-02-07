@@ -7,17 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.encryption import encrypt
 from app.models import Credential, SyncLog
-from app.plaid import PlaidClient
-from app.schemas import (
-    CredentialCreate,
-    CredentialResponse,
-    LinkTokenResponse,
-    SyncResponse,
-)
+from app.schemas import CredentialCreate, CredentialResponse, SyncResponse
+from app.simplefin import SimpleFINClient
 from app.sync import sync_accounts
 
 log = logging.getLogger(__name__)
@@ -25,125 +19,46 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/sandbox-token", response_model=CredentialResponse)
-async def create_sandbox_token(
-    institution_id: str = "ins_109508",  # First Platypus Bank
-    db: AsyncSession = Depends(get_db),
-) -> Credential:
-    """Create credentials using Plaid sandbox (no Link UI needed).
-
-    This endpoint bypasses the normal Link flow for testing.
-    Only works in sandbox environment.
-
-    Default institution is First Platypus Bank (ins_109508).
-    Other sandbox institutions:
-    - ins_109509: First Gingham Credit Union
-    - ins_109510: Tattersall Federal Credit Union
-    """
-    if settings.plaid_environment != "sandbox":
-        raise HTTPException(400, "Only available in sandbox environment")
-
-    # Check if credentials already exist
-    existing = await db.scalar(
-        select(Credential).where(Credential.provider == "plaid")
-    )
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="Plaid credentials already configured. Delete existing credentials first.",
-        )
-
-    client = PlaidClient()
-
-    try:
-        # Create sandbox public token directly (skips Link UI)
-        public_token = await client.create_sandbox_public_token(
-            institution_id=institution_id, products=["transactions"]
-        )
-
-        # Exchange for access token
-        access_token, item_id = await client.exchange_public_token(public_token)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to create sandbox credentials: {e}",
-        ) from None
-
-    # Encrypt and store
-    now = int(time.time())
-    credential = Credential(
-        id=str(uuid.uuid4()),
-        provider="plaid",
-        encrypted_data=encrypt(
-            json.dumps({"access_token": access_token, "item_id": item_id})
-        ),
-        created_at=now,
-    )
-    db.add(credential)
-    await db.flush()
-
-    return credential
-
-
-@router.post("/link-token", response_model=LinkTokenResponse)
-async def create_link_token() -> LinkTokenResponse:
-    """Create a Plaid Link token for frontend use.
-
-    Use this token with Plaid Link in your frontend to initiate
-    the bank connection flow. After the user completes Link,
-    exchange the public_token via POST /sync/credentials.
-    """
-    client = PlaidClient()
-
-    try:
-        link_token = await client.create_link_token(user_id="default")
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to create link token: {e}",
-        ) from None
-
-    return LinkTokenResponse(link_token=link_token)
-
-
 @router.post("/credentials", response_model=CredentialResponse)
-async def exchange_token(
+async def claim_setup_token(
     data: CredentialCreate,
     db: AsyncSession = Depends(get_db),
 ) -> Credential:
-    """Exchange a Plaid public_token for access credentials.
+    """Claim a SimpleFIN setup token and store the access credentials.
 
-    After a user completes the Plaid Link flow, call this endpoint
-    with the public_token to store the access credentials.
+    Get a setup token from https://bridge.simplefin.org, then pass it here.
+    Setup tokens are one-time use — a 403 means the token was already claimed.
     """
     # Check if credentials already exist
     existing = await db.scalar(
-        select(Credential).where(Credential.provider == "plaid")
+        select(Credential).where(Credential.provider == "simplefin")
     )
     if existing:
         raise HTTPException(
             status_code=400,
-            detail="Plaid credentials already configured. Delete existing credentials first.",
+            detail="SimpleFIN credentials already configured. Delete existing credentials first.",
         )
 
-    client = PlaidClient()
-
     try:
-        access_token, item_id = await client.exchange_public_token(data.public_token)
+        access_url = await SimpleFINClient.claim_setup_token(data.setup_token)
     except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 403:
+            raise HTTPException(
+                status_code=400,
+                detail="Setup token already claimed. Get a new one from bridge.simplefin.org.",
+            ) from None
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to exchange token: {e}",
+            detail=f"Failed to claim setup token: {e}",
         ) from None
 
     # Encrypt and store
     now = int(time.time())
     credential = Credential(
         id=str(uuid.uuid4()),
-        provider="plaid",
-        encrypted_data=encrypt(
-            json.dumps({"access_token": access_token, "item_id": item_id})
-        ),
+        provider="simplefin",
+        encrypted_data=encrypt(json.dumps({"access_url": access_url})),
         created_at=now,
     )
     db.add(credential)
@@ -154,9 +69,9 @@ async def exchange_token(
 
 @router.delete("/credentials")
 async def delete_credentials(db: AsyncSession = Depends(get_db)) -> dict:
-    """Delete stored Plaid credentials."""
+    """Delete stored SimpleFIN credentials."""
     credential = await db.scalar(
-        select(Credential).where(Credential.provider == "plaid")
+        select(Credential).where(Credential.provider == "simplefin")
     )
     if not credential:
         raise HTTPException(status_code=404, detail="No credentials found")
@@ -169,20 +84,21 @@ async def delete_credentials(db: AsyncSession = Depends(get_db)) -> dict:
 async def trigger_sync(
     db: AsyncSession = Depends(get_db),
 ) -> SyncLog:
-    """Trigger a sync from Plaid.
+    """Trigger a sync from SimpleFIN.
 
-    Uses cursor-based sync for efficient incremental updates.
-    On first sync, fetches all available transactions.
-    On subsequent syncs, fetches only new/modified/removed transactions.
+    Fetches accounts and transactions for the date range since last sync
+    (or last 60 days on first sync).
 
-    Returns:
-        SyncLog with results
+    Returns 429 if synced too recently (~24 requests/day limit).
     """
     try:
         sync_log = await sync_accounts(db)
         return sync_log
     except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        msg = str(e)
+        if "Too soon" in msg:
+            raise HTTPException(status_code=429, detail=msg) from None
+        raise HTTPException(status_code=409, detail=msg) from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from None
 

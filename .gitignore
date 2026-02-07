@@ -44,6 +44,12 @@ data/
 .pytest_cache/
 .coverage
 htmlcov/
+.playwright-mcp/
+*.png
+
+# Frontend
+node_modules/
+dist/
 
 # Claude Code (track agents and settings, ignore local settings)
 .claude/settings.local.json

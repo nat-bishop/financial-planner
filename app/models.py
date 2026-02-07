@@ -2,7 +2,6 @@ import time
 
 from sqlalchemy import (
     Boolean,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -23,9 +22,9 @@ class Credential(Base):
     __tablename__ = "credentials"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, unique=True)  # 'plaid'
+    provider: Mapped[str] = mapped_column(String, unique=True)  # 'simplefin'
     encrypted_data: Mapped[str] = mapped_column(Text)  # Fernet-encrypted JSON
-    sync_cursor: Mapped[str | None] = mapped_column(String, nullable=True)  # Plaid cursor
+    sync_cursor: Mapped[str | None] = mapped_column(String, nullable=True)  # Unix timestamp of last sync
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -37,9 +36,8 @@ class Account(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # Provider's account ID
     provider: Mapped[str] = mapped_column(
-        String, default="plaid"
-    )  # 'plaid', 'manual'
-    org_domain: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g., "chase.com"
+        String, default="simplefin"
+    )  # 'simplefin', 'manual'
     org_name: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g., "Chase"
     name: Mapped[str] = mapped_column(String)
     account_type: Mapped[str | None] = mapped_column(
@@ -91,20 +89,6 @@ class Transaction(Base):
     account: Mapped["Account"] = relationship(back_populates="transactions")
 
 
-class CategoryRule(Base):
-    """Rules for auto-categorization."""
-
-    __tablename__ = "category_rules"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pattern: Mapped[str] = mapped_column(String)  # Regex or substring
-    category: Mapped[str] = mapped_column(String)
-    subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
-    confidence: Mapped[float] = mapped_column(Float, default=1.0)
-    source: Mapped[str] = mapped_column(String, default="manual")  # 'manual' | 'llm'
-    created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
-
-
 class SyncLog(Base):
     """Sync operation history with raw payloads."""
 
@@ -122,4 +106,4 @@ class SyncLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_response: Mapped[str | None] = mapped_column(
         Text, nullable=True
-    )  # Full Plaid JSON
+    )  # Sync response summary JSON

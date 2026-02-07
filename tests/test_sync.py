@@ -1,4 +1,4 @@
-"""Tests for Plaid sync functionality."""
+"""Tests for SimpleFIN sync functionality."""
 
 import json
 import time
@@ -9,13 +9,12 @@ import pytest
 from sqlalchemy import select
 
 from app.encryption import decrypt, encrypt
-from app.models import Account, Credential, Transaction
-from app.plaid import (
-    PlaidAccount,
-    PlaidSyncResponse,
-    PlaidTransaction,
-    _plaid_amount_to_cents,
-    _plaid_date_to_timestamp,
+from app.models import Account, Credential, SyncLog, Transaction
+from app.simplefin import (
+    SFAccount,
+    SFSyncResponse,
+    SFTransaction,
+    _sfin_amount_to_cents,
 )
 from app.sync import sync_accounts
 
@@ -23,13 +22,13 @@ from app.sync import sync_accounts
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def load_plaid_initial_fixture() -> dict:
-    with (FIXTURES_DIR / "plaid_sync_initial.json").open() as f:
+def load_simplefin_initial_fixture() -> dict:
+    with (FIXTURES_DIR / "simplefin_sync_initial.json").open() as f:
         return json.load(f)
 
 
-def load_plaid_incremental_fixture() -> dict:
-    with (FIXTURES_DIR / "plaid_sync_incremental.json").open() as f:
+def load_simplefin_incremental_fixture() -> dict:
+    with (FIXTURES_DIR / "simplefin_sync_incremental.json").open() as f:
         return json.load(f)
 
 
@@ -38,136 +37,95 @@ class TestEncryption:
 
     def test_encrypt_decrypt_roundtrip(self):
         """Encrypted data can be decrypted back."""
-        original = "secret_access_token_12345"
+        original = "secret_access_url_12345"
         encrypted = encrypt(original)
         decrypted = decrypt(encrypted)
         assert decrypted == original
         assert encrypted != original
 
 
-class TestPlaidAmountConversion:
-    """Test Plaid amount conversion (critical - sign inversion)."""
+class TestSfinAmountConversion:
+    """Test SimpleFIN amount conversion (string decimal parsing)."""
 
-    def test_positive_amount_becomes_negative(self):
-        """Plaid positive (expense) becomes our negative."""
-        # Plaid: 50.00 means money out (expense)
-        # Our convention: negative means expense
-        assert _plaid_amount_to_cents(50.00) == -5000
+    def test_negative_amount_stays_negative(self):
+        """Negative (expense) stays negative — no sign inversion."""
+        assert _sfin_amount_to_cents("-50.00") == -5000
 
-    def test_negative_amount_becomes_positive(self):
-        """Plaid negative (income) becomes our positive."""
-        # Plaid: -1500.00 means money in (income/deposit)
-        # Our convention: positive means income
-        assert _plaid_amount_to_cents(-1500.00) == 150000
+    def test_positive_amount_stays_positive(self):
+        """Positive (income/deposit) stays positive."""
+        assert _sfin_amount_to_cents("1500.00") == 150000
 
     def test_zero_amount(self):
         """Zero stays zero."""
-        assert _plaid_amount_to_cents(0) == 0
+        assert _sfin_amount_to_cents("0") == 0
+        assert _sfin_amount_to_cents("0.00") == 0
 
     def test_fractional_cents_rounded(self):
-        """Fractional cents are rounded."""
-        assert _plaid_amount_to_cents(10.005) == -1001  # rounds up
-        assert _plaid_amount_to_cents(10.004) == -1000  # rounds down
+        """Fractional cents are rounded correctly using Decimal."""
+        assert _sfin_amount_to_cents("-10.155") == -1016  # rounds up (half-up)
+        assert _sfin_amount_to_cents("-10.154") == -1015  # rounds down
+
+    def test_precision_preserved(self):
+        """Decimal parsing avoids float precision issues."""
+        # float("10.15") * 100 = 1014.999... but Decimal gets it right
+        assert _sfin_amount_to_cents("10.15") == 1015
+        assert _sfin_amount_to_cents("-10.15") == -1015
 
 
-class TestPlaidDateConversion:
-    """Test Plaid date conversion."""
-
-    def test_date_string_to_timestamp(self):
-        """YYYY-MM-DD becomes Unix timestamp (local time)."""
-        from datetime import datetime
-
-        # The conversion uses local time, so we verify by converting back
-        timestamp = _plaid_date_to_timestamp("2024-01-15")
-        # Convert back and check the date portion
-        dt = datetime.fromtimestamp(timestamp)
-        assert dt.year == 2024
-        assert dt.month == 1
-        assert dt.day == 15
-
-
-class TestPlaidClientParsing:
-    """Test Plaid response parsing."""
+class TestSimpleFINParsing:
+    """Test SimpleFIN response parsing."""
 
     def test_parse_accounts(self):
         """Accounts are parsed correctly from fixture data."""
-        fixture = load_plaid_initial_fixture()
+        fixture = load_simplefin_initial_fixture()
+        response = _fixture_to_sfin_response(fixture)
 
-        accounts = []
-        for acc in fixture["accounts"]:
-            balances = acc["balances"]
-            account = PlaidAccount(
-                id=acc["account_id"],
-                name=acc["name"],
-                official_name=acc.get("official_name"),
-                type=acc["type"],
-                subtype=acc.get("subtype"),
-                mask=acc.get("mask"),
-                balance_current=int(balances["current"] * 100),
-                balance_available=int(balances["available"] * 100) if balances.get("available") else None,
-                currency=balances.get("iso_currency_code", "USD"),
-            )
-            accounts.append(account)
-
-        assert len(accounts) == 2
+        assert len(response.accounts) == 2
 
         # Check checking account
-        checking = accounts[0]
+        checking = response.accounts[0]
         assert checking.id == "ACT_001"
-        assert checking.name == "Plaid Checking"
-        assert checking.official_name == "Plaid Gold Checking"
-        assert checking.type == "depository"
-        assert checking.subtype == "checking"
+        assert checking.name == "My Checking"
         assert checking.balance_current == 123456  # cents
         assert checking.balance_available == 120000  # cents
+        assert checking.org_name == "First Bank"
+        assert checking.currency == "USD"
 
         # Check credit card
-        credit = accounts[1]
+        credit = response.accounts[1]
         assert credit.id == "ACT_002"
-        assert credit.type == "credit"
-        assert credit.subtype == "credit card"
-        assert credit.balance_current == 50000  # cents (positive in Plaid for owed amount)
+        assert credit.balance_current == -50000  # negative balance (owed)
         assert credit.balance_available is None
 
     def test_parse_transactions(self):
-        """Transactions are parsed correctly with amount inversion."""
-        fixture = load_plaid_initial_fixture()
+        """Transactions are parsed correctly — no sign inversion."""
+        fixture = load_simplefin_initial_fixture()
+        response = _fixture_to_sfin_response(fixture)
 
-        transactions = []
-        for tx in fixture["added"]:
-            transaction = PlaidTransaction(
-                id=tx["transaction_id"],
-                account_id=tx["account_id"],
-                amount=_plaid_amount_to_cents(tx["amount"]),
-                date=_plaid_date_to_timestamp(tx["date"]),
-                description=tx.get("merchant_name") or tx.get("name", ""),
-                pending=tx["pending"],
-                category=tx.get("personal_finance_category", {}).get("primary"),
-            )
-            transactions.append(transaction)
-
-        assert len(transactions) == 3
+        assert len(response.transactions) == 3
 
         # Check expense (Amazon purchase)
-        amazon = transactions[0]
-        assert amazon.id == "TXN_001"
-        assert amazon.amount == -5000  # Plaid 50.00 -> -5000 cents (expense)
+        amazon = next(t for t in response.transactions if t.id == "TXN_001")
+        assert amazon.amount == -5000  # -50.00 stays -5000 cents
         assert amazon.description == "Amazon"
-        assert amazon.category == "SHOPPING"
         assert amazon.pending is False
 
         # Check income (Payroll)
-        payroll = transactions[1]
-        assert payroll.id == "TXN_002"
-        assert payroll.amount == 150000  # Plaid -1500.00 -> +150000 cents (income)
-        assert payroll.description == "PAYROLL"
-        assert payroll.category == "INCOME"
+        payroll = next(t for t in response.transactions if t.id == "TXN_002")
+        assert payroll.amount == 150000  # 1500.00 stays +150000 cents
 
-        # Check pending transaction
-        restaurant = transactions[2]
-        assert restaurant.id == "TXN_003"
+        # Check pending transaction (posted=0 → pending=True)
+        restaurant = next(t for t in response.transactions if t.id == "TXN_003")
         assert restaurant.pending is True
-        assert restaurant.category == "FOOD_AND_DRINK"
+        assert restaurant.date > 0  # posted=0 gets substituted with current time
+
+    def test_parse_errors(self):
+        """Error array is captured from response."""
+        fixture = load_simplefin_incremental_fixture()
+        response = _fixture_to_sfin_response(fixture)
+
+        assert len(response.errors) == 1
+        assert "Rate limit" in response.errors[0]
 
 
 class TestSyncAccounts:
@@ -175,49 +133,45 @@ class TestSyncAccounts:
 
     @pytest.mark.asyncio
     async def test_sync_creates_accounts_and_transactions(self, db):
-        """Sync creates accounts and transactions from Plaid data."""
-        # Setup: create credentials
+        """Sync creates accounts and transactions from SimpleFIN data."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
+            provider="simplefin",
             encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
             })),
         )
         db.add(cred)
         await db.flush()
 
-        # Mock Plaid client
-        fixture = load_plaid_initial_fixture()
-        mock_response = _fixture_to_plaid_response(fixture)
+        fixture = load_simplefin_initial_fixture()
+        mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response)
+        with patch("app.sync.SimpleFINClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
             sync_log = await sync_accounts(db)
 
         assert sync_log.status == "success"
         assert sync_log.accounts_synced == 2
         assert sync_log.transactions_added == 3
-        assert sync_log.transactions_updated == 0
         assert sync_log.raw_response is not None
 
         # Verify accounts were created
         accounts = (await db.scalars(select(Account))).all()
         assert len(accounts) == 2
 
-        # Verify account types include subtype
+        # Verify provider is simplefin
         checking = next(a for a in accounts if a.id == "ACT_001")
-        assert checking.account_type == "depository/checking"
-        assert checking.org_domain is None  # Plaid doesn't provide this
+        assert checking.provider == "simplefin"
+        assert checking.org_name == "First Bank"
 
         # Verify transactions were created
         transactions = (await db.scalars(select(Transaction))).all()
         assert len(transactions) == 3
 
-        # Verify amount conversion
+        # Verify amount convention (no sign inversion)
         amazon_tx = next(t for t in transactions if t.external_id == "TXN_001")
         assert amazon_tx.amount == -5000  # expense is negative
 
@@ -225,169 +179,101 @@ class TestSyncAccounts:
         assert payroll_tx.amount == 150000  # income is positive
 
     @pytest.mark.asyncio
-    async def test_sync_stores_plaid_category(self, db):
-        """New transactions get Plaid's category populated."""
+    async def test_sync_stores_cursor_as_timestamp(self, db):
+        """Sync stores current timestamp as cursor."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
+            provider="simplefin",
             encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
             })),
         )
         db.add(cred)
         await db.flush()
 
-        fixture = load_plaid_initial_fixture()
-        mock_response = _fixture_to_plaid_response(fixture)
+        fixture = load_simplefin_initial_fixture()
+        mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response)
+        before = int(time.time())
+
+        with patch("app.sync.SimpleFINClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
             await sync_accounts(db)
 
-        # Verify Plaid categories were stored
-        transactions = (await db.scalars(select(Transaction))).all()
-
-        amazon_tx = next(t for t in transactions if t.external_id == "TXN_001")
-        assert amazon_tx.category == "SHOPPING"
-
-        payroll_tx = next(t for t in transactions if t.external_id == "TXN_002")
-        assert payroll_tx.category == "INCOME"
+        cred = await db.get(Credential, "cred_1")
+        cursor_ts = int(cred.sync_cursor)
+        assert cursor_ts >= before
 
     @pytest.mark.asyncio
-    async def test_sync_uses_cursor_for_incremental(self, db):
-        """Second sync uses stored cursor."""
+    async def test_sync_logs_simplefin_errors(self, db):
+        """SimpleFIN errors array is captured in sync log."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
+            provider="simplefin",
             encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
             })),
         )
         db.add(cred)
         await db.flush()
 
-        # First sync
-        fixture1 = load_plaid_initial_fixture()
-        mock_response1 = _fixture_to_plaid_response(fixture1)
+        fixture = load_simplefin_incremental_fixture()
+        mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response1)
-            await sync_accounts(db)
-
-            # Verify cursor was stored
-            cred = await db.get(Credential, "cred_1")
-            assert cred.sync_cursor == "cursor_page1"
-
-        # Second sync with incremental response
-        fixture2 = load_plaid_incremental_fixture()
-        mock_response2 = _fixture_to_plaid_response(fixture2)
-
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response2)
-
+        with patch("app.sync.SimpleFINClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
             sync_log = await sync_accounts(db)
 
-            # Verify cursor was passed
-            mock_client.sync_transactions.assert_called_once()
-            call_args = mock_client.sync_transactions.call_args
-            assert call_args[0][1] == "cursor_page1"  # cursor argument
-
         assert sync_log.status == "success"
-        assert sync_log.transactions_added == 1  # TXN_004
-        assert sync_log.transactions_updated == 1  # TXN_003 modified
+        assert "Rate limit" in sync_log.error_message
 
     @pytest.mark.asyncio
-    async def test_sync_removes_deleted_transactions(self, db):
-        """Removed transactions are deleted from database."""
+    async def test_sync_preserves_user_fields_on_update(self, db):
+        """User-set categories are preserved when transaction is re-synced."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
+            provider="simplefin",
             encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
-            })),
-        )
-        db.add(cred)
-        await db.flush()
-
-        # First sync - creates 3 transactions
-        fixture1 = load_plaid_initial_fixture()
-        mock_response1 = _fixture_to_plaid_response(fixture1)
-
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response1)
-            await sync_accounts(db)
-
-        transactions = (await db.scalars(select(Transaction))).all()
-        assert len(transactions) == 3
-
-        # Second sync - removes TXN_001
-        fixture2 = load_plaid_incremental_fixture()
-        mock_response2 = _fixture_to_plaid_response(fixture2)
-
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response2)
-            await sync_accounts(db)
-
-        # TXN_001 should be gone, TXN_004 added = still 3 total
-        transactions = (await db.scalars(select(Transaction))).all()
-        assert len(transactions) == 3
-
-        # Verify TXN_001 is gone
-        external_ids = [t.external_id for t in transactions]
-        assert "TXN_001" not in external_ids
-        assert "TXN_004" in external_ids
-
-    @pytest.mark.asyncio
-    async def test_sync_preserves_user_category_on_modified(self, db):
-        """User-set categories are preserved when transaction is modified."""
-        cred = Credential(
-            id="cred_1",
-            provider="plaid",
-            encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
             })),
         )
         db.add(cred)
         await db.flush()
 
         # First sync
-        fixture1 = load_plaid_initial_fixture()
-        mock_response1 = _fixture_to_plaid_response(fixture1)
+        fixture1 = load_simplefin_initial_fixture()
+        mock_response1 = _fixture_to_sfin_response(fixture1)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response1)
+        with patch("app.sync.SimpleFINClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response1)
             await sync_accounts(db)
 
         # User updates category on TXN_003
         tx = await db.scalar(
             select(Transaction).where(Transaction.external_id == "TXN_003")
         )
-        tx.category = "Dining Out"  # User's custom category
+        tx.category = "Dining Out"
         tx.notes = "Birthday dinner"
         await db.flush()
 
-        # Second sync modifies TXN_003 (pending -> not pending)
-        fixture2 = load_plaid_incremental_fixture()
-        mock_response2 = _fixture_to_plaid_response(fixture2)
+        # Second sync — TXN_003 now has real posted date (not pending)
+        fixture2 = load_simplefin_incremental_fixture()
+        mock_response2 = _fixture_to_sfin_response(fixture2)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response2)
+        # Need to remove rate limit check for this test
+        with (
+            patch("app.sync.SimpleFINClient") as MockClient,
+            patch("app.sync.MIN_SYNC_INTERVAL", 0),
+        ):
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response2)
             await sync_accounts(db)
 
-        # Refresh the session to get updated data
+        # Refresh
         await db.commit()
-        # Expire all objects to force refresh from DB
         db.expire_all()
 
         # Verify user fields preserved
@@ -396,7 +282,7 @@ class TestSyncAccounts:
         )
         assert tx.category == "Dining Out"  # Preserved
         assert tx.notes == "Birthday dinner"  # Preserved
-        assert tx.is_pending is False  # Updated from Plaid
+        assert tx.is_pending is False  # Updated from SimpleFIN
 
     @pytest.mark.asyncio
     async def test_sync_fails_without_credentials(self, db):
@@ -404,37 +290,34 @@ class TestSyncAccounts:
         sync_log = await sync_accounts(db)
 
         assert sync_log.status == "failed"
-        assert "No Plaid credentials" in sync_log.error_message
+        assert "No SimpleFIN credentials" in sync_log.error_message
 
     @pytest.mark.asyncio
     async def test_sync_deduplicates_transactions(self, db):
         """Running sync twice doesn't create duplicate transactions."""
         cred = Credential(
             id="cred_1",
-            provider="plaid",
+            provider="simplefin",
             encrypted_data=encrypt(json.dumps({
-                "access_token": "access-sandbox-test",
-                "item_id": "item_test",
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
             })),
         )
         db.add(cred)
         await db.flush()
 
-        fixture = load_plaid_initial_fixture()
-        mock_response = _fixture_to_plaid_response(fixture)
+        fixture = load_simplefin_initial_fixture()
+        mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.PlaidClient") as MockPlaidClient:
-            mock_client = MockPlaidClient.return_value
-            mock_client.sync_transactions = AsyncMock(return_value=mock_response)
+        with (
+            patch("app.sync.SimpleFINClient") as MockClient,
+            patch("app.sync.MIN_SYNC_INTERVAL", 0),
+        ):
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
             # First sync
             sync_log1 = await sync_accounts(db)
             assert sync_log1.transactions_added == 3
-
-            # Reset cursor to simulate re-fetching same data
-            cred = await db.get(Credential, "cred_1")
-            cred.sync_cursor = None
-            await db.flush()
 
             # Second sync - same transactions
             sync_log2 = await sync_accounts(db)
@@ -444,6 +327,31 @@ class TestSyncAccounts:
         transactions = (await db.scalars(select(Transaction))).all()
         assert len(transactions) == 3
 
+    @pytest.mark.asyncio
+    async def test_sync_rate_limited(self, db):
+        """Sync rejects if called too soon after last success."""
+        # Create a recent successful sync log
+        recent_sync = SyncLog(
+            started_at=int(time.time()) - 60,
+            completed_at=int(time.time()) - 60,
+            status="success",
+        )
+        db.add(recent_sync)
+        await db.flush()
+
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.flush()
+
+        with pytest.raises(RuntimeError, match="Too soon"):
+            await sync_accounts(db)
+
 
 class TestTransactionUpdate:
     """Test transaction editing."""
@@ -451,11 +359,9 @@ class TestTransactionUpdate:
     @pytest.mark.asyncio
     async def test_update_transaction_category(self, db):
         """Transaction category can be updated."""
-        # Create account and transaction
         account = Account(
             id="act_1",
-            provider="plaid",
-            org_domain=None,
+            provider="simplefin",
             name="Test Account",
         )
         db.add(account)
@@ -484,58 +390,53 @@ class TestTransactionUpdate:
         assert updated_tx.updated_at is not None
 
 
-def _fixture_to_plaid_response(fixture: dict) -> PlaidSyncResponse:
-    """Convert fixture JSON to PlaidSyncResponse."""
-    accounts = []
-    for acc in fixture.get("accounts", []):
-        balances = acc["balances"]
-        account = PlaidAccount(
-            id=acc["account_id"],
-            name=acc["name"],
-            official_name=acc.get("official_name"),
-            type=acc["type"],
-            subtype=acc.get("subtype"),
-            mask=acc.get("mask"),
-            balance_current=int(balances["current"] * 100),
-            balance_available=int(balances["available"] * 100) if balances.get("available") else None,
-            currency=balances.get("iso_currency_code", "USD"),
+def _fixture_to_sfin_response(fixture: dict) -> SFSyncResponse:
+    """Convert fixture JSON to SFSyncResponse."""
+    now = int(time.time())
+    accounts: list[SFAccount] = []
+    transactions: list[SFTransaction] = []
+
+    for acc_data in fixture.get("accounts", []):
+        org = acc_data.get("org", {})
+        org_name = org.get("name") or org.get("domain")
+
+        account = SFAccount(
+            id=acc_data["id"],
+            name=acc_data.get("name", ""),
+            currency=acc_data.get("currency", "USD"),
+            balance_current=_sfin_amount_to_cents(str(acc_data.get("balance", "0"))),
+            balance_available=(
+                _sfin_amount_to_cents(str(acc_data["available-balance"]))
+                if acc_data.get("available-balance") is not None
+                else None
+            ),
+            balance_date=acc_data.get("balance-date"),
+            org_name=org_name,
         )
         accounts.append(account)
 
-    added = []
-    for tx in fixture.get("added", []):
-        transaction = PlaidTransaction(
-            id=tx["transaction_id"],
-            account_id=tx["account_id"],
-            amount=_plaid_amount_to_cents(tx["amount"]),
-            date=_plaid_date_to_timestamp(tx["date"]),
-            description=tx.get("merchant_name") or tx.get("name", ""),
-            pending=tx["pending"],
-            category=tx.get("personal_finance_category", {}).get("primary"),
-        )
-        added.append(transaction)
+        for tx_data in acc_data.get("transactions", []):
+            posted = tx_data.get("posted", 0)
+            pending = posted == 0
+            if pending:
+                posted = now
 
-    modified = []
-    for tx in fixture.get("modified", []):
-        transaction = PlaidTransaction(
-            id=tx["transaction_id"],
-            account_id=tx["account_id"],
-            amount=_plaid_amount_to_cents(tx["amount"]),
-            date=_plaid_date_to_timestamp(tx["date"]),
-            description=tx.get("merchant_name") or tx.get("name", ""),
-            pending=tx["pending"],
-            category=tx.get("personal_finance_category", {}).get("primary"),
-        )
-        modified.append(transaction)
+            transaction = SFTransaction(
+                id=tx_data["id"],
+                account_id=acc_data["id"],
+                amount=_sfin_amount_to_cents(str(tx_data.get("amount", "0"))),
+                date=posted,
+                description=tx_data.get("description", ""),
+                pending=pending,
+            )
+            transactions.append(transaction)
 
-    removed = [tx["transaction_id"] for tx in fixture.get("removed", [])]
-
-    return PlaidSyncResponse(
+    return SFSyncResponse(
         accounts=accounts,
-        added=added,
-        modified=modified,
-        removed=removed,
-        next_cursor=fixture.get("next_cursor", ""),
-        has_more=fixture.get("has_more", False),
-        raw_json=json.dumps(fixture),
+        transactions=transactions,
+        errors=fixture.get("errors", []),
+        raw_json=json.dumps({
+            "accounts_count": len(accounts),
+            "errors": fixture.get("errors", []),
+        }),
     )
