@@ -1,49 +1,32 @@
-"""Sync orchestration for SimpleFIN data."""
+"""Sync orchestration for Plaid data."""
 
 import json
 import time
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.encryption import decrypt
 from app.models import Account, Credential, SyncLog, Transaction
-from app.simplefin import SimpleFINClient, _to_cents
+from app.plaid import PlaidAccount, PlaidClient, PlaidTransaction
 
 
-async def get_simplefin_client(db: AsyncSession) -> SimpleFINClient | None:
-    """Get SimpleFIN client from stored credentials."""
-    credential = await db.scalar(
-        select(Credential).where(Credential.provider == "simplefin")
-    )
-    if not credential:
-        return None
-
-    cred_data = json.loads(decrypt(credential.encrypted_data))
-    return SimpleFINClient(cred_data["access_url"])
+async def get_plaid_credential(db: AsyncSession) -> Credential | None:
+    """Get Plaid credential from database."""
+    return await db.scalar(select(Credential).where(Credential.provider == "plaid"))
 
 
-async def sync_accounts(
-    db: AsyncSession, start_date: int | None = None, end_date: int | None = None
-) -> SyncLog:
-    """Sync accounts and transactions from SimpleFIN.
+async def sync_accounts(db: AsyncSession) -> SyncLog:
+    """Sync accounts and transactions from Plaid.
 
-    Args:
-        db: Database session
-        start_date: Unix timestamp for transaction start date (default: 60 days ago)
-        end_date: Unix timestamp for transaction end date (default: now)
+    Uses cursor-based sync for efficient incremental updates.
+    Saves cursor after each page for safe checkpointing.
 
     Returns:
         SyncLog with results
     """
     now = int(time.time())
-
-    # Default to 60-day window (SimpleFIN's max)
-    if start_date is None:
-        start_date = now - (60 * 24 * 60 * 60)
-    if end_date is None:
-        end_date = now
 
     # Create sync log entry
     sync_log = SyncLog(started_at=now, status="running")
@@ -51,33 +34,66 @@ async def sync_accounts(
     await db.flush()
 
     try:
-        client = await get_simplefin_client(db)
-        if not client:
+        credential = await get_plaid_credential(db)
+        if not credential:
             sync_log.status = "failed"
-            sync_log.error_message = "No SimpleFIN credentials configured"
+            sync_log.error_message = "No Plaid credentials configured"
             sync_log.completed_at = int(time.time())
             return sync_log
 
-        # Fetch data from SimpleFIN
-        response = await client.fetch_accounts(start_date=start_date, end_date=end_date)
-        sync_log.raw_response = response.raw_json
+        # Decrypt credentials
+        cred_data = json.loads(decrypt(credential.encrypted_data))
+        access_token = cred_data["access_token"]
 
-        transactions_synced = 0
+        client = PlaidClient()
+        cursor = credential.sync_cursor  # None for first sync
 
-        for sf_account in response.accounts:
-            # Upsert account
-            await _upsert_account(db, sf_account)
+        accounts_synced = set()
+        transactions_added = 0
+        transactions_updated = 0
+        transactions_removed = 0
+        raw_responses = []
 
-            # Upsert transactions
-            for tx in sf_account.transactions:
-                await _upsert_transaction(db, sf_account.id, tx)
-                transactions_synced += 1
+        while True:
+            response = await client.sync_transactions(access_token, cursor)
+            raw_responses.append(response.raw_json)
 
-        sync_log.accounts_synced = len(response.accounts)
-        sync_log.transactions_added = transactions_synced
-        sync_log.transactions_updated = 0
+            # Upsert accounts
+            for account in response.accounts:
+                await _upsert_account(db, account)
+                accounts_synced.add(account.id)
+
+            # Handle added transactions
+            for tx in response.added:
+                await _upsert_transaction(db, tx, use_plaid_category=True)
+                transactions_added += 1
+
+            # Handle modified transactions (upsert preserves user fields)
+            for tx in response.modified:
+                await _upsert_transaction(db, tx, use_plaid_category=False)
+                transactions_updated += 1
+
+            # Hard delete removed transactions (bank is source of truth)
+            for tx_id in response.removed:
+                result = await db.execute(
+                    delete(Transaction).where(Transaction.external_id == tx_id)
+                )
+                if result.rowcount > 0:
+                    transactions_removed += 1
+
+            # Save cursor after each page (safe checkpoint on partial failure)
+            credential.sync_cursor = response.next_cursor
+            await db.flush()
+
+            if not response.has_more:
+                break
+
+        sync_log.accounts_synced = len(accounts_synced)
+        sync_log.transactions_added = transactions_added
+        sync_log.transactions_updated = transactions_updated
         sync_log.status = "success"
         sync_log.completed_at = int(time.time())
+        sync_log.raw_response = json.dumps(raw_responses)
 
     except Exception as e:
         sync_log.status = "failed"
@@ -89,20 +105,26 @@ async def sync_accounts(
     return sync_log
 
 
-async def _upsert_account(db: AsyncSession, sf_account) -> None:
-    """Insert or update an account from SimpleFIN data."""
+async def _upsert_account(db: AsyncSession, account: PlaidAccount) -> None:
+    """Insert or update an account from Plaid data."""
     now = int(time.time())
 
+    # Combine type and subtype for account_type (e.g., "depository/checking")
+    account_type = account.type
+    if account.subtype:
+        account_type = f"{account.type}/{account.subtype}"
+
     stmt = insert(Account).values(
-        id=sf_account.id,
-        provider="simplefin",
-        org_domain=sf_account.org_domain,
-        org_name=sf_account.org_name,
-        name=sf_account.name,
-        currency=sf_account.currency,
-        balance_current=sf_account.balance,
-        balance_available=sf_account.available_balance,
-        balance_date=sf_account.balance_date,
+        id=account.id,
+        provider="plaid",
+        org_domain=None,  # Plaid doesn't provide institution domains
+        org_name=account.official_name or account.name,
+        name=account.name,
+        account_type=account_type,
+        currency=account.currency,
+        balance_current=account.balance_current,
+        balance_available=account.balance_available,
+        balance_date=now,
         last_synced_at=now,
         created_at=now,
     )
@@ -110,9 +132,9 @@ async def _upsert_account(db: AsyncSession, sf_account) -> None:
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={
-            "org_domain": stmt.excluded.org_domain,
             "org_name": stmt.excluded.org_name,
             "name": stmt.excluded.name,
+            "account_type": stmt.excluded.account_type,
             "balance_current": stmt.excluded.balance_current,
             "balance_available": stmt.excluded.balance_available,
             "balance_date": stmt.excluded.balance_date,
@@ -123,38 +145,53 @@ async def _upsert_account(db: AsyncSession, sf_account) -> None:
     await db.execute(stmt)
 
 
-async def _upsert_transaction(db: AsyncSession, account_id: str, tx: dict) -> None:
-    """Insert or update a transaction from SimpleFIN data."""
+async def _upsert_transaction(
+    db: AsyncSession, tx: PlaidTransaction, use_plaid_category: bool = True
+) -> None:
+    """Insert or update a transaction from Plaid data.
+
+    Args:
+        db: Database session
+        tx: Plaid transaction data
+        use_plaid_category: If True, set category from Plaid for new transactions.
+            For modified transactions, this should be False to preserve user-set categories.
+    """
     now = int(time.time())
 
-    # SimpleFIN transaction format
-    external_id = tx.get("id")
-    posted_at = tx.get("posted", 0)
-    amount = _to_cents(tx.get("amount")) or 0
-    description = tx.get("description", "")
-    is_pending = tx.get("pending", False)
+    # For new transactions, include Plaid's category
+    values = {
+        "account_id": tx.account_id,
+        "external_id": tx.id,
+        "posted_at": tx.date,
+        "amount": tx.amount,
+        "description": tx.description,
+        "is_pending": tx.pending,
+        "raw_data": json.dumps({
+            "plaid_id": tx.id,
+            "plaid_category": tx.category,
+            "pending": tx.pending,
+        }),
+        "created_at": now,
+    }
 
-    stmt = insert(Transaction).values(
-        account_id=account_id,
-        external_id=external_id,
-        posted_at=posted_at,
-        amount=amount,
-        description=description,
-        is_pending=is_pending,
-        raw_data=json.dumps(tx),
-        created_at=now,
-    )
+    if use_plaid_category and tx.category:
+        values["category"] = tx.category
+
+    stmt = insert(Transaction).values(**values)
+
+    # On conflict, update core fields but preserve user-managed fields
+    update_set = {
+        "posted_at": stmt.excluded.posted_at,
+        "amount": stmt.excluded.amount,
+        "description": stmt.excluded.description,
+        "is_pending": stmt.excluded.is_pending,
+        "raw_data": stmt.excluded.raw_data,
+        "updated_at": now,
+    }
 
     stmt = stmt.on_conflict_do_update(
         index_elements=["account_id", "external_id"],
-        set_={
-            "posted_at": stmt.excluded.posted_at,
-            "amount": stmt.excluded.amount,
-            "description": stmt.excluded.description,
-            "is_pending": stmt.excluded.is_pending,
-            "raw_data": stmt.excluded.raw_data,
-            "updated_at": now,
-        },
+        set_=update_set,
     )
 
     await db.execute(stmt)

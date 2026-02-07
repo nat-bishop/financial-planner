@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 # Credentials
 class CredentialCreate(BaseModel):
-    setup_token: str  # SimpleFIN setup token to claim
+    public_token: str  # Plaid public token from Link
 
 
 class CredentialResponse(BaseModel):
@@ -21,7 +21,7 @@ class AccountResponse(BaseModel):
 
     id: str
     provider: str
-    org_domain: str
+    org_domain: str | None
     org_name: str | None
     name: str
     account_type: str | None

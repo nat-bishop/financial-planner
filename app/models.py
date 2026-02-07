@@ -23,8 +23,9 @@ class Credential(Base):
     __tablename__ = "credentials"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, unique=True)  # 'simplefin'
+    provider: Mapped[str] = mapped_column(String, unique=True)  # 'plaid'
     encrypted_data: Mapped[str] = mapped_column(Text)  # Fernet-encrypted JSON
+    sync_cursor: Mapped[str | None] = mapped_column(String, nullable=True)  # Plaid cursor
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -36,9 +37,9 @@ class Account(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # Provider's account ID
     provider: Mapped[str] = mapped_column(
-        String, default="simplefin"
-    )  # 'simplefin', 'plaid', 'manual'
-    org_domain: Mapped[str] = mapped_column(String)  # e.g., "chase.com"
+        String, default="plaid"
+    )  # 'plaid', 'manual'
+    org_domain: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g., "chase.com"
     org_name: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g., "Chase"
     name: Mapped[str] = mapped_column(String)
     account_type: Mapped[str | None] = mapped_column(
@@ -121,4 +122,4 @@ class SyncLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_response: Mapped[str | None] = mapped_column(
         Text, nullable=True
-    )  # Full SimpleFIN JSON
+    )  # Full Plaid JSON

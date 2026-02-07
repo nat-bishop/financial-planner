@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     # Encryption key for credentials (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     encryption_key: str = ""
 
-    # SimpleFIN
-    simplefin_base_url: str = "https://beta-bridge.simplefin.org"
+    # Plaid
+    plaid_client_id: str = ""
+    plaid_secret: str = ""
+    plaid_environment: str = "sandbox"  # sandbox | development | production
 
 
 settings = Settings()

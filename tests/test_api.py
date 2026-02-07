@@ -99,8 +99,8 @@ class TestAccountsEndpoint:
         """List accounts returns all accounts."""
         account = Account(
             id="act_1",
-            provider="simplefin",
-            org_domain="chase.com",
+            provider="plaid",
+            org_domain=None,
             org_name="Chase",
             name="Chase Checking",
             balance_current=123456,
@@ -120,8 +120,8 @@ class TestAccountsEndpoint:
         """Get specific account by ID."""
         account = Account(
             id="act_1",
-            provider="simplefin",
-            org_domain="chase.com",
+            provider="plaid",
+            org_domain=None,
             name="Chase Checking",
         )
         test_db.add(account)
@@ -144,8 +144,8 @@ class TestTransactionsEndpoint:
         """List transactions with filters."""
         account = Account(
             id="act_1",
-            provider="simplefin",
-            org_domain="chase.com",
+            provider="plaid",
+            org_domain=None,
             name="Test Account",
         )
         test_db.add(account)
@@ -189,8 +189,8 @@ class TestTransactionsEndpoint:
         """Update transaction category and notes."""
         account = Account(
             id="act_1",
-            provider="simplefin",
-            org_domain="chase.com",
+            provider="plaid",
+            org_domain=None,
             name="Test Account",
         )
         test_db.add(account)
@@ -221,8 +221,8 @@ class TestAnalyticsEndpoint:
         """Get spending grouped by category."""
         account = Account(
             id="act_1",
-            provider="simplefin",
-            org_domain="chase.com",
+            provider="plaid",
+            org_domain=None,
             name="Test Account",
         )
         test_db.add(account)
