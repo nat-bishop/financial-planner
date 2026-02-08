@@ -2,22 +2,33 @@ services:
   backend:
     build: .
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
     volumes:
       - db-data:/app/data
       - ./app:/app/app
       - ./alembic:/app/alembic
     env_file: .env
-    command: sh -c "uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn app.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${BACKEND_PORT:-8000}/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   frontend:
     build: ./frontend
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend/src:/app/src
+    environment:
+      - VITE_API_URL=http://backend:${BACKEND_PORT:-8000}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   db-data:

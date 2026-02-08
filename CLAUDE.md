@@ -13,24 +13,22 @@ Finance Planner is a personal finance application that syncs financial data from
 ## Commands
 
 ```bash
-# Quick start
-make dev                             # Migrate + start backend & frontend
+# Docker workflow (primary)
+make start                           # Build & start backend + frontend containers
+make stop                            # Stop all services
+make logs                            # Tail service logs
+make restart                         # Stop + start
 
-# Or start individually
+# Local workflow (no Docker)
+make dev                             # Migrate + start backend & frontend locally
+make migrate                         # Apply migrations locally
 uv sync                              # Install backend dependencies
 cd frontend && npm install           # Install frontend dependencies
-make migrate                         # Apply migrations (required before first run)
-uvicorn app.main:app --reload        # Backend dev server (port 8000)
-cd frontend && npm run dev           # Frontend dev server (port 5173)
-
-# Docker
-docker compose up                    # Start everything in containers
 
 # Testing & linting
-pytest                               # Run all tests (35 tests)
-pytest tests/test_api.py             # Run one test file
-pytest tests/test_api.py::TestSyncEndpoints::test_trigger_sync_409_when_already_running -v  # Single test
-ruff check app tests                 # Lint
+make test                            # Run all tests (or: pytest)
+make lint                            # Lint (or: ruff check app tests)
+pytest tests/test_api.py -v          # Run one test file
 ruff check app tests --fix           # Auto-fix lint issues
 
 # Migrations
@@ -79,5 +77,7 @@ alembic revision --autogenerate -m "description"  # Create migration
 Required env vars (see `.env.example`):
 - `ENCRYPTION_KEY` — Fernet key (generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
 - `DATABASE_URL` — Default: `sqlite+aiosqlite:///./data/finance.db`
+- `BACKEND_PORT` — Default: `8000`. Used by Docker Compose for port mapping.
+- `FRONTEND_PORT` — Default: `5173`. Used by Docker Compose for port mapping.
 
 SimpleFIN needs no env vars — the setup token is provided via the UI.
