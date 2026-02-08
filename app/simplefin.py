@@ -130,14 +130,23 @@ class SimpleFINClient:
             "pending": "1",
         }
 
-        async with httpx.AsyncClient(auth=self._auth) as client:
+        async with httpx.AsyncClient(auth=self._auth, timeout=60.0) as client:
             resp = await client.get(
                 f"{self._base_url}/accounts",
                 params=params,
             )
-            resp.raise_for_status()
 
         data = resp.json()
+
+        # SimpleFIN returns {"errors": [...], "accounts": []} even on 400s.
+        # Surface their error messages instead of a raw httpx exception.
+        if not resp.is_success:
+            errors = data.get("errors", [])
+            if errors:
+                raise RuntimeError(
+                    "SimpleFIN: " + "; ".join(errors)
+                )
+            resp.raise_for_status()
 
         # Strip credentials from raw JSON before storing
         raw_json = json.dumps({

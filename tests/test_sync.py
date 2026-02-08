@@ -266,7 +266,7 @@ class TestSyncAccounts:
         # Need to remove rate limit check for this test
         with (
             patch("app.sync.SimpleFINClient") as MockClient,
-            patch("app.sync.MIN_SYNC_INTERVAL", 0),
+            patch("app.sync.MAX_SYNCS_PER_DAY", 999),
         ):
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response2)
@@ -310,7 +310,7 @@ class TestSyncAccounts:
 
         with (
             patch("app.sync.SimpleFINClient") as MockClient,
-            patch("app.sync.MIN_SYNC_INTERVAL", 0),
+            patch("app.sync.MAX_SYNCS_PER_DAY", 999),
         ):
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
@@ -329,14 +329,14 @@ class TestSyncAccounts:
 
     @pytest.mark.asyncio
     async def test_sync_rate_limited(self, db):
-        """Sync rejects if called too soon after last success."""
-        # Create a recent successful sync log
-        recent_sync = SyncLog(
-            started_at=int(time.time()) - 60,
-            completed_at=int(time.time()) - 60,
-            status="success",
-        )
-        db.add(recent_sync)
+        """Sync rejects if daily limit (24 syncs) is reached."""
+        now = int(time.time())
+        for i in range(24):
+            db.add(SyncLog(
+                started_at=now - (i * 100),
+                completed_at=now - (i * 100),
+                status="success",
+            ))
         await db.flush()
 
         cred = Credential(
@@ -349,7 +349,7 @@ class TestSyncAccounts:
         db.add(cred)
         await db.flush()
 
-        with pytest.raises(RuntimeError, match="Too soon"):
+        with pytest.raises(RuntimeError, match="Daily limit reached"):
             await sync_accounts(db)
 
 

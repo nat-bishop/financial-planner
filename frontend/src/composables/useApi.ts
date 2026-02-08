@@ -2,6 +2,12 @@ import { ref } from 'vue'
 
 const BASE = '/api'
 
+function parseDetail(detail: unknown, status: number): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ')
+  return `HTTP ${status}`
+}
+
 export function useApi() {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -23,7 +29,7 @@ export function useApi() {
       const res = await fetch(url.toString())
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        throw new Error(body.detail || `HTTP ${res.status}`)
+        throw new Error(parseDetail(body.detail, res.status))
       }
       return await res.json() as T
     } catch (e: any) {
@@ -46,7 +52,7 @@ export function useApi() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail || `HTTP ${res.status}`)
+        throw new Error(parseDetail(data.detail, res.status))
       }
       return await res.json() as T
     } catch (e: any) {
@@ -69,7 +75,7 @@ export function useApi() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail || `HTTP ${res.status}`)
+        throw new Error(parseDetail(data.detail, res.status))
       }
       return await res.json() as T
     } catch (e: any) {
@@ -88,7 +94,7 @@ export function useApi() {
       const res = await fetch(BASE + path, { method: 'DELETE' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.detail || `HTTP ${res.status}`)
+        throw new Error(parseDetail(data.detail, res.status))
       }
       return await res.json() as T
     } catch (e: any) {

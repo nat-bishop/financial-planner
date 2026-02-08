@@ -301,17 +301,18 @@ class TestSyncEndpoints:
         assert "already in progress" in response.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_trigger_sync_429_when_too_soon(self, client, db):
-        """POST /sync/ returns 429 when synced too recently."""
+    async def test_trigger_sync_429_when_daily_limit_reached(self, client, db):
+        """POST /sync/ returns 429 when daily sync limit is reached."""
         with patch("app.routes.sync.sync_accounts") as mock_sync:
             mock_sync.side_effect = RuntimeError(
-                "Too soon — SimpleFIN allows ~24 requests/day. Try again in 55 minutes."
+                "Daily limit reached — 24 syncs in the last 24 hours. "
+                "SimpleFIN allows ~24 requests/day."
             )
 
             response = await client.post("/sync/")
 
         assert response.status_code == 429
-        assert "Too soon" in response.json()["detail"]
+        assert "Daily limit reached" in response.json()["detail"]
 
     @pytest.mark.asyncio
     async def test_delete_credentials(self, client, db):

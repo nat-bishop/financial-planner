@@ -96,8 +96,10 @@ async def trigger_sync(
         return sync_log
     except RuntimeError as e:
         msg = str(e)
-        if "Too soon" in msg:
+        if "Daily limit" in msg:
             raise HTTPException(status_code=429, detail=msg) from None
+        if "SimpleFIN:" in msg:
+            raise HTTPException(status_code=400, detail=msg) from None
         raise HTTPException(status_code=409, detail=msg) from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from None

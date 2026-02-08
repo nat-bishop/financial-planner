@@ -5,7 +5,7 @@ import json
 import logging
 import time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,9 @@ log = logging.getLogger(__name__)
 
 _sync_lock = asyncio.Lock()
 
-# Minimum interval between syncs (seconds). SimpleFIN allows ~24 req/day.
-MIN_SYNC_INTERVAL = 3600  # 1 hour
+# SimpleFIN allows ~24 requests per day.
+MAX_SYNCS_PER_DAY = 24
+_ONE_DAY = 86400
 
 
 async def get_credential(db: AsyncSession) -> Credential | None:
@@ -35,26 +36,24 @@ async def sync_accounts(db: AsyncSession) -> SyncLog:
         SyncLog with results
 
     Raises:
-        RuntimeError: If a sync is already in progress or too soon since last sync
+        RuntimeError: If a sync is already in progress or daily limit reached
     """
     if _sync_lock.locked():
         raise RuntimeError("Sync already in progress")
 
-    # Rate limit check: minimum interval between syncs
-    last_success = await db.scalar(
-        select(SyncLog)
-        .where(SyncLog.status == "success")
-        .order_by(SyncLog.completed_at.desc())
-        .limit(1)
+    # Rate limit: max 24 successful syncs per rolling 24-hour window
+    now = int(time.time())
+    day_ago = now - _ONE_DAY
+    sync_count = await db.scalar(
+        select(func.count())
+        .select_from(SyncLog)
+        .where(SyncLog.status == "success", SyncLog.completed_at >= day_ago)
     )
-    if last_success and last_success.completed_at:
-        elapsed = int(time.time()) - last_success.completed_at
-        if elapsed < MIN_SYNC_INTERVAL:
-            wait_minutes = (MIN_SYNC_INTERVAL - elapsed) // 60 + 1
-            raise RuntimeError(
-                f"Too soon — SimpleFIN allows ~24 requests/day. "
-                f"Try again in {wait_minutes} minutes."
-            )
+    if sync_count and sync_count >= MAX_SYNCS_PER_DAY:
+        raise RuntimeError(
+            f"Daily limit reached — {MAX_SYNCS_PER_DAY} syncs in the last 24 hours. "
+            f"SimpleFIN allows ~24 requests/day."
+        )
 
     async with _sync_lock:
         return await _sync_accounts_inner(db)

@@ -50,6 +50,10 @@ htmlcov/
 # Frontend
 node_modules/
 dist/
+*.tsbuildinfo
+
+# Logs
+*.log
 
 # Claude Code (track agents and settings, ignore local settings)
 .claude/settings.local.json
