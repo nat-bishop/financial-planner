@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Finance Planner is a personal finance application that syncs financial data from SimpleFIN Bridge. It provides account management, transaction tracking, and spending analytics with encrypted credential storage.
 
-**Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 (async), SQLite/aiosqlite, httpx, Pydantic 2.0
+**Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 (async), SQLite/aiosqlite, httpx, Pydantic 2.0, google-genai (Gemini)
 **Frontend:** Vue 3 + Vite + TypeScript + Tailwind CSS v4 + Pinia (in `frontend/`)
 **Package Managers:** uv (backend), npm (frontend)
 
@@ -44,12 +44,40 @@ alembic revision --autogenerate -m "description"  # Create migration
 4. Upserts preserve user-managed fields (category, tags, notes) while overwriting provider fields (amount, description, is_pending)
 5. Rate limited: minimum 1-hour interval between syncs (~24 requests/day matches SimpleFIN quota). Returns 429 if too soon.
 
+### Layered Architecture
+
+```
+app/
+├── main.py                    # App assembly
+├── models.py                  # SQLAlchemy models (Credential, Account, Transaction, SyncLog, Category)
+├── schemas.py                 # Pydantic schemas
+├── core/                      # Shared infrastructure
+│   ├── config.py              # Pydantic settings from .env
+│   ├── database.py            # Session factory (get_db dependency)
+│   └── encryption.py          # Fernet encrypt/decrypt
+├── clients/                   # External API clients (pure HTTP, no DB)
+│   ├── simplefin.py           # SimpleFIN Bridge client (httpx)
+│   └── gemini.py              # Gemini structured output client (google-genai)
+├── services/                  # Business logic (orchestration, DB writes)
+│   ├── sync.py                # SimpleFIN sync orchestration
+│   └── categorize.py          # Batch transaction categorization
+├── routes/                    # Thin HTTP handlers
+│   ├── accounts.py, analytics.py, health.py, sync.py, transactions.py
+│   ├── categories.py          # Category CRUD
+│   └── llm.py                 # LLM status, categorize, chat endpoints
+```
+
+**Layer rules:** `core/` = infrastructure, `clients/` = pure HTTP (no DB), `services/` = business logic, `routes/` = thin handlers.
+
 ### Key Modules
-- `app/simplefin.py` — Async SimpleFIN Bridge client using `httpx.AsyncClient`. Dataclasses: `SFAccount`, `SFTransaction`, `SFSyncResponse`. Amount parsing via `decimal.Decimal` for precision.
-- `app/sync.py` — Sync orchestration: date-range query, upserts via `insert().on_conflict_do_update()`, `_sync_lock` mutex, rate limit enforcement.
-- `app/routes/sync.py` — Credential management (claim setup token / delete) and sync trigger endpoint.
-- `app/database.py` — Session factory with auto-commit on success, auto-rollback on exception (via `get_db` dependency).
-- `app/config.py` — Pydantic settings from `.env`. See `.env.example` for required vars.
+- `app/clients/simplefin.py` — Async SimpleFIN Bridge client using `httpx.AsyncClient`. Dataclasses: `SFAccount`, `SFTransaction`, `SFSyncResponse`. Amount parsing via `decimal.Decimal` for precision.
+- `app/clients/gemini.py` — Gemini client with `generate()`, `generate_structured()` (Pydantic response_schema + retry), `stream()`. Singleton via `get_gemini_client()`.
+- `app/services/sync.py` — Sync orchestration: date-range query, upserts via `insert().on_conflict_do_update()`, `_sync_lock` mutex, rate limit enforcement.
+- `app/services/categorize.py` — Batch categorization: builds prompt from Category table, calls Gemini structured output, applies confidence threshold.
+- `app/routes/llm.py` — `GET /llm/status`, `POST /llm/categorize`, `POST /llm/chat` (SSE streaming).
+- `app/routes/categories.py` — Category CRUD. DELETE nullifies transactions with that category.
+- `app/core/database.py` — Session factory with auto-commit on success, auto-rollback on exception (via `get_db` dependency).
+- `app/core/config.py` — Pydantic settings from `.env`. See `.env.example` for required vars.
 
 ### Critical Conventions
 - **Amounts in cents** as integers. **Sign convention:** negative = expense, positive = income. **Matches SimpleFIN** (no sign inversion needed). Conversion in `_sfin_amount_to_cents()`.
@@ -57,12 +85,14 @@ alembic revision --autogenerate -m "description"  # Create migration
 - **Upsert field split:** On conflict, `posted_at`, `amount`, `description`, `is_pending`, `raw_data` are overwritten. `category`, `subcategory`, `tags`, `notes` are preserved. This is what makes user edits survive re-syncs.
 - **No transaction removal:** SimpleFIN doesn't report removed transactions.
 - **Setup tokens are one-time use.** A 403 on claim means the token was already used — get a new one.
+- **Category states:** `category IS NULL` = uncategorized (never attempted). `category = "Unable to Categorize"` + `categorize_confidence IS NOT NULL` = LLM tried, below threshold. `category = "Food & Dining"` + `categorize_confidence = 0.92` = LLM categorized. `category = "Food & Dining"` + `categorize_confidence IS NULL` = user manually set.
+- **Confidence threshold** is evaluated only at categorize time. Changing `CATEGORIZE_CONFIDENCE_THRESHOLD` does NOT retroactively change existing categorizations.
 
 ### Frontend
 - Vite proxies `/api/*` → backend (strips `/api` prefix). Default target `http://localhost:8000` for local dev; Docker sets `VITE_API_URL=http://backend:<port>` via compose environment.
 - The `useApi.ts` composable prefixes all fetch calls with `/api`.
 - Tailwind CSS **v4** — uses `@import "tailwindcss"` and `@theme {}` blocks in `style.css`, not a v3 tailwind.config.
-- Pinia stores in `src/stores/` (accounts, transactions, sync).
+- Pinia stores in `src/stores/` (accounts, transactions, sync, categories, llm).
 - **SimpleFIN connect flow:** User pastes setup token in text input → `sync.ts:claimSetupToken()` → POST `/sync/credentials` → auto-triggers sync. No SDK or CDN needed.
 
 ### Docker & Infrastructure
@@ -76,7 +106,7 @@ alembic revision --autogenerate -m "description"  # Create migration
 ## Migrations
 
 - **Alembic is the sole schema manager** — no `create_all()` at startup.
-- Migrations are squashed into a single `001_initial.py`. Do not auto-generate migrations that duplicate columns already in `001`.
+- `001_initial.py` = base schema. `002_add_categories_and_confidence.py` = categories table + `categorize_confidence` column + 16 default categories seeded.
 - Docker Compose runs `alembic upgrade head` explicitly before starting uvicorn.
 - The backend lifespan handler also attempts auto-migration on startup, but silently skips errors (belt-and-suspenders).
 
@@ -87,6 +117,7 @@ alembic revision --autogenerate -m "description"  # Create migration
 - Tests use in-memory SQLite and mock `SimpleFINClient` via `unittest.mock.patch`. Fixtures in `tests/fixtures/` provide SimpleFIN response data (initial + incremental).
 - The `ENCRYPTION_KEY` env var is set in `conftest.py` before app module imports.
 - Tests that need multiple syncs patch `MIN_SYNC_INTERVAL` to 0 to bypass rate limiting.
+- LLM tests mock `GeminiClient` via `app.dependency_overrides[_get_client]` (FastAPI DI override).
 
 ## Configuration
 
@@ -97,3 +128,12 @@ Required env vars (see `.env.example`):
 - `FRONTEND_PORT` — Default: `5173`. Used by Docker Compose for port mapping.
 
 SimpleFIN needs no env vars — the setup token is provided via the UI.
+
+Optional env vars for LLM features:
+- `GEMINI_API_KEY` — Gemini API key (get from https://aistudio.google.com/apikey)
+- `GEMINI_CATEGORIZE_MODEL` — Default: `gemini-2.0-flash`
+- `GEMINI_TEMPERATURE` — Default: `0.1`
+- `GEMINI_MAX_TOKENS` — Default: `4096`
+- `CATEGORIZE_BATCH_SIZE` — Default: `30`
+- `CATEGORIZE_LIMIT` — Default: `100`
+- `CATEGORIZE_CONFIDENCE_THRESHOLD` — Default: `0.7`
