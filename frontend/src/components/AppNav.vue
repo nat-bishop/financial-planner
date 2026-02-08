@@ -8,6 +8,7 @@ const links = [
   { to: '/', label: 'Overview', icon: 'grid' },
   { to: '/transactions', label: 'Transactions', icon: 'list' },
   { to: '/accounts', label: 'Accounts', icon: 'wallet' },
+  { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
 const isActive = (path: string) => {
@@ -76,6 +77,12 @@ const currentTime = computed(() => {
           <rect x="1" y="4" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
           <path d="M1 7h16" stroke="currentColor" stroke-width="1.5"/>
           <circle cx="13" cy="11" r="1.5" fill="currentColor"/>
+        </svg>
+        <svg v-else-if="link.icon === 'settings'" width="18" height="18" viewBox="0 0 18 18" fill="none"
+          :class="isActive(link.to) ? 'text-accent' : 'text-surface-400 group-hover:text-surface-500'"
+        >
+          <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M9 1v2M9 15v2M1 9h2M15 9h2M3.34 3.34l1.42 1.42M13.24 13.24l1.42 1.42M3.34 14.66l1.42-1.42M13.24 4.76l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
 
         <span class="font-medium">{{ link.label }}</span>

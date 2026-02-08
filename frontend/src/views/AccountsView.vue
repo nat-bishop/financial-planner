@@ -1,27 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { useAccountsStore } from '../stores/accounts'
-import { useSyncStore } from '../stores/sync'
 import AccountCard from '../components/AccountCard.vue'
 import SyncButton from '../components/SyncButton.vue'
 import { formatCurrency } from '../composables/useApi'
 
 const accountsStore = useAccountsStore()
-const syncStore = useSyncStore()
-const setupToken = ref('')
 
 onMounted(async () => {
   await accountsStore.fetch()
 })
-
-async function connectBank() {
-  if (!setupToken.value.trim()) return
-  const ok = await syncStore.claimSetupToken(setupToken.value.trim())
-  if (ok) {
-    setupToken.value = ''
-    await accountsStore.fetch()
-  }
-}
 </script>
 
 <template>
@@ -37,43 +25,6 @@ async function connectBank() {
       <div class="flex items-center gap-3">
         <SyncButton />
       </div>
-    </div>
-
-    <!-- Connect bank (shown when accounts exist) -->
-    <div
-      v-if="accountsStore.accounts.length > 0"
-      class="bg-surface-0 rounded-2xl p-6 mb-8 border border-surface-200/50"
-    >
-      <div class="flex items-end gap-3">
-        <div class="flex-1">
-          <label class="block text-xs font-mono uppercase tracking-widest text-surface-500 mb-2">
-            SimpleFIN Setup Token
-          </label>
-          <input
-            v-model="setupToken"
-            type="text"
-            placeholder="Paste setup token from bridge.simplefin.org"
-            class="w-full px-4 py-2 bg-surface-50 border border-surface-200 rounded-xl text-sm text-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent font-mono"
-          />
-        </div>
-        <button
-          @click="connectBank"
-          :disabled="syncStore.claiming || !setupToken.trim()"
-          class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-surface-0 rounded-xl transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
-          :class="{ 'opacity-60 cursor-wait': syncStore.claiming, 'opacity-40 cursor-not-allowed': !setupToken.trim() }"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          <span v-if="syncStore.claiming">Connecting...</span>
-          <span v-else>Connect</span>
-        </button>
-      </div>
-      <p class="mt-2 text-xs text-surface-400">
-        Get a setup token from
-        <a href="https://bridge.simplefin.org" target="_blank" rel="noopener" class="text-accent-dim underline hover:text-accent transition-colors">bridge.simplefin.org</a>
-      </p>
-      <p v-if="syncStore.error" class="mt-2 text-xs text-expense font-mono">{{ syncStore.error }}</p>
     </div>
 
     <!-- Net worth summary -->
@@ -128,35 +79,15 @@ async function connectBank() {
       <p class="text-sm text-surface-400 mb-8 max-w-md mx-auto">
         Connect your bank account to start tracking your finances.
       </p>
-      <div class="max-w-lg mx-auto">
-        <div class="flex items-end gap-3">
-          <div class="flex-1">
-            <input
-              v-model="setupToken"
-              type="text"
-              placeholder="Paste SimpleFIN setup token"
-              class="w-full px-4 py-3 bg-surface-0 border border-surface-200 rounded-xl text-sm text-surface-900 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent font-mono"
-            />
-          </div>
-          <button
-            @click="connectBank"
-            :disabled="syncStore.claiming || !setupToken.trim()"
-            class="inline-flex items-center gap-2 px-6 py-3 bg-accent text-surface-0 text-sm font-medium rounded-xl transition-all hover:brightness-110 active:scale-[0.98]"
-            :class="{ 'opacity-60 cursor-wait': syncStore.claiming, 'opacity-40 cursor-not-allowed': !setupToken.trim() }"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-            {{ syncStore.claiming ? 'Connecting...' : 'Connect' }}
-          </button>
-        </div>
-        <p class="mt-3 text-xs text-surface-400">
-          Get a setup token from
-          <a href="https://bridge.simplefin.org" target="_blank" rel="noopener" class="text-accent-dim underline hover:text-accent transition-colors">bridge.simplefin.org</a>
-          ($1.50/mo)
-        </p>
-      </div>
-      <p v-if="syncStore.error" class="mt-4 text-xs text-expense font-mono">{{ syncStore.error }}</p>
+      <router-link
+        to="/settings"
+        class="inline-flex items-center gap-2 px-6 py-3 bg-accent text-surface-0 text-sm font-medium rounded-xl transition-all hover:brightness-110 active:scale-[0.98]"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Connect in Settings
+      </router-link>
     </div>
 
     <!-- Loading -->

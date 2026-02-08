@@ -9,6 +9,7 @@ export const useSyncStore = defineStore('sync', () => {
   const health = ref<HealthResponse | null>(null)
   const error = ref<string | null>(null)
   const claiming = ref(false)
+  const connected = ref(false)
 
   async function triggerSync(): Promise<SyncLog | null> {
     const api = useApi()
@@ -32,6 +33,7 @@ export const useSyncStore = defineStore('sync', () => {
     error.value = null
     try {
       await api.post('/sync/credentials', { setup_token: setupToken })
+      connected.value = true
       await triggerSync()
       return true
     } catch (e: any) {
@@ -42,17 +44,36 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
+  async function deleteCredentials(): Promise<boolean> {
+    const api = useApi()
+    error.value = null
+    try {
+      await api.del('/sync/credentials')
+      connected.value = false
+      return true
+    } catch (e: any) {
+      error.value = e.message
+      return false
+    }
+  }
+
   async function fetchHealth() {
     const api = useApi()
     try {
       health.value = await api.get<HealthResponse>('/health')
+      connected.value = health.value.last_sync_at != null
+      console.log('fetchHealth:', {
+        lastSyncAt: health.value.last_sync_at,
+        connected: connected.value,
+        accountCount: health.value.account_count
+      })
     } catch (e: any) {
       error.value = e.message
     }
   }
 
   return {
-    syncing, lastSync, health, error, claiming,
-    triggerSync, claimSetupToken, fetchHealth,
+    syncing, lastSync, health, error, claiming, connected,
+    triggerSync, claimSetupToken, deleteCredentials, fetchHealth,
   }
 })

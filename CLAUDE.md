@@ -55,14 +55,30 @@ alembic revision --autogenerate -m "description"  # Create migration
 - **Amounts in cents** as integers. **Sign convention:** negative = expense, positive = income. **Matches SimpleFIN** (no sign inversion needed). Conversion in `_sfin_amount_to_cents()`.
 - **Dates** as Unix timestamps (integers). SimpleFIN uses Unix timestamps natively. Pending transactions have `posted=0`, substituted with current timestamp.
 - **Upsert field split:** On conflict, `posted_at`, `amount`, `description`, `is_pending`, `raw_data` are overwritten. `category`, `subcategory`, `tags`, `notes` are preserved. This is what makes user edits survive re-syncs.
-- **No transaction removal:** SimpleFIN doesn't report removed transactions (unlike Plaid's cursor-based sync).
+- **No transaction removal:** SimpleFIN doesn't report removed transactions.
 - **Setup tokens are one-time use.** A 403 on claim means the token was already used — get a new one.
 
 ### Frontend
-- Vite proxies `/api/*` → `http://localhost:8000` (strips `/api` prefix). The `useApi.ts` composable prefixes all fetch calls with `/api`.
+- Vite proxies `/api/*` → backend (strips `/api` prefix). Default target `http://localhost:8000` for local dev; Docker sets `VITE_API_URL=http://backend:<port>` via compose environment.
+- The `useApi.ts` composable prefixes all fetch calls with `/api`.
 - Tailwind CSS **v4** — uses `@import "tailwindcss"` and `@theme {}` blocks in `style.css`, not a v3 tailwind.config.
 - Pinia stores in `src/stores/` (accounts, transactions, sync).
 - **SimpleFIN connect flow:** User pastes setup token in text input → `sync.ts:claimSetupToken()` → POST `/sync/credentials` → auto-triggers sync. No SDK or CDN needed.
+
+### Docker & Infrastructure
+- **Primary workflow:** `make start` / `make stop`. Runs via Docker Compose.
+- **Port configuration:** `BACKEND_PORT` and `FRONTEND_PORT` in `.env`, referenced in `docker-compose.yml` via `${VAR:-default}` interpolation.
+- **Health check:** Backend exposes `GET /health` (queries DB). Docker Compose uses it with `condition: service_healthy` so frontend waits for backend readiness.
+- **Hot reload:** Source volumes mounted (`./app`, `./frontend/src`) for live reload in containers.
+- **Data persistence:** `db-data` Docker volume stores SQLite database across restarts.
+- **Local fallback:** `make dev` runs both servers directly (no Docker). Uses `trap 'kill 0' EXIT` for cleanup.
+
+## Migrations
+
+- **Alembic is the sole schema manager** — no `create_all()` at startup.
+- Migrations are squashed into a single `001_initial.py`. Do not auto-generate migrations that duplicate columns already in `001`.
+- Docker Compose runs `alembic upgrade head` explicitly before starting uvicorn.
+- The backend lifespan handler also attempts auto-migration on startup, but silently skips errors (belt-and-suspenders).
 
 ## Lint / Testing Notes
 
