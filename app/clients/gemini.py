@@ -10,7 +10,12 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
-from app.core.config import settings
+from app.core.config import (
+    GEMINI_CATEGORIZE_MODEL,
+    GEMINI_MAX_TOKENS,
+    GEMINI_TEMPERATURE,
+    settings,
+)
 
 log = logging.getLogger(__name__)
 
@@ -124,8 +129,8 @@ def get_gemini_client() -> GeminiClient:
             raise ValueError("GEMINI_API_KEY not set")
         _client = GeminiClient(
             api_key=settings.gemini_api_key,
-            model=settings.gemini_categorize_model,
-            temperature=settings.gemini_temperature,
-            max_tokens=settings.gemini_max_tokens,
+            model=GEMINI_CATEGORIZE_MODEL,
+            temperature=GEMINI_TEMPERATURE,
+            max_tokens=GEMINI_MAX_TOKENS,
         )
     return _client

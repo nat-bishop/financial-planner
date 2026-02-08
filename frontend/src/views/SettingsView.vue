@@ -11,11 +11,7 @@ const disconnecting = ref(false)
 
 onMounted(async () => {
   await syncStore.fetchHealth()
-  console.log('SettingsView mounted:', {
-    connected: syncStore.connected,
-    health: syncStore.health,
-    lastSyncAt: syncStore.health?.last_sync_at
-  })
+  await accountsStore.fetchAll()
 })
 
 async function connectBank() {
@@ -126,6 +122,53 @@ async function disconnect() {
       </div>
 
       <p v-if="syncStore.error" class="mt-3 text-xs text-expense font-mono">{{ syncStore.error }}</p>
+    </div>
+
+    <!-- Account Visibility -->
+    <div
+      v-if="accountsStore.allAccounts.length > 0"
+      class="bg-surface-0 rounded-2xl p-6 border border-surface-200/50 mt-6"
+    >
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-8 h-8 bg-surface-100 rounded-lg flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.5" class="text-surface-500"/>
+            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5" class="text-accent"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-sm font-medium text-surface-900">Account Visibility</h2>
+          <p class="text-xs text-surface-500">Hidden accounts still sync but won't appear in dashboard, transactions, or analytics</p>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div
+          v-for="account in accountsStore.allAccounts"
+          :key="account.id"
+          class="flex items-center justify-between px-4 py-3 rounded-xl border border-surface-200/50"
+          :class="account.is_disabled ? 'opacity-50' : ''"
+        >
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-surface-300 truncate">
+              {{ account.org_name || account.name }}
+            </p>
+            <p v-if="account.org_name" class="text-xs text-surface-500 truncate">
+              {{ account.name }}
+            </p>
+          </div>
+          <button
+            @click="accountsStore.toggleDisabled(account.id, !account.is_disabled)"
+            class="shrink-0 ml-4 relative w-10 h-6 rounded-full transition-colors duration-200 cursor-pointer"
+            :class="account.is_disabled ? 'bg-surface-200' : 'bg-accent'"
+          >
+            <span
+              class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
+              :class="account.is_disabled ? '' : 'translate-x-4'"
+            ></span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

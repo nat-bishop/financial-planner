@@ -7,9 +7,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.gemini import GeminiClient, get_gemini_client
-from app.core.config import settings
+from app.core.config import GEMINI_CATEGORIZE_MODEL, settings
 from app.core.database import get_db
-from app.models import Account, Transaction
+from app.models import Account, Transaction, exclude_disabled_accounts
 from app.schemas import (
     CategorizeRequest,
     CategorizeResponse,
@@ -36,7 +36,7 @@ async def llm_status() -> LLMStatusResponse:
     """Check if Gemini is configured."""
     return LLMStatusResponse(
         configured=bool(settings.gemini_api_key),
-        model=settings.gemini_categorize_model,
+        model=GEMINI_CATEGORIZE_MODEL,
     )
 
 
@@ -67,14 +67,16 @@ async def chat(
 ) -> StreamingResponse:
     """Stream a chat response with financial context."""
     # Build context from account summary
-    accounts = await db.scalars(select(Account))
+    accounts = await db.scalars(
+        select(Account).where(Account.is_disabled == False)  # noqa: E712
+    )
     account_list = list(accounts.all())
 
     now = int(time.time())
     thirty_days_ago = now - (30 * 86400)
 
     # Get recent spending summary
-    spending_result = await db.execute(
+    spending_query = (
         select(
             Transaction.category,
             func.sum(Transaction.amount).label("total"),
@@ -85,6 +87,7 @@ async def chat(
         .group_by(Transaction.category)
         .order_by(func.sum(Transaction.amount))
     )
+    spending_result = await db.execute(exclude_disabled_accounts(spending_query))
     spending_rows = spending_result.all()
 
     # Build system prompt with financial context

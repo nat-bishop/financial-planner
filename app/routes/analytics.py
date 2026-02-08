@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Transaction
+from app.models import Transaction, exclude_disabled_accounts
 from app.schemas import SpendingByCategory, SpendingByCategoryResponse
 
 router = APIRouter()
@@ -45,6 +45,7 @@ async def spending_by_category(
         .group_by(Transaction.category)
         .order_by(func.sum(Transaction.amount))  # Most spending first
     )
+    query = exclude_disabled_accounts(query)
 
     result = await db.execute(query)
     rows = result.all()

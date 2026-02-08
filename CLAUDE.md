@@ -129,11 +129,8 @@ Required env vars (see `.env.example`):
 
 SimpleFIN needs no env vars — the setup token is provided via the UI.
 
-Optional env vars for LLM features:
+Optional env var for LLM features:
 - `GEMINI_API_KEY` — Gemini API key (get from https://aistudio.google.com/apikey)
-- `GEMINI_CATEGORIZE_MODEL` — Default: `gemini-2.0-flash`
-- `GEMINI_TEMPERATURE` — Default: `0.1`
-- `GEMINI_MAX_TOKENS` — Default: `4096`
-- `CATEGORIZE_BATCH_SIZE` — Default: `30`
-- `CATEGORIZE_LIMIT` — Default: `100`
-- `CATEGORIZE_CONFIDENCE_THRESHOLD` — Default: `0.7`
+
+LLM application defaults (constants in `app/core/config.py`, not env-overridable):
+`GEMINI_CATEGORIZE_MODEL`, `GEMINI_TEMPERATURE`, `GEMINI_MAX_TOKENS`, `CATEGORIZE_BATCH_SIZE`, `CATEGORIZE_LIMIT`, `CATEGORIZE_CONFIDENCE_THRESHOLD`.

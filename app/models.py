@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import select as sa_select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -52,6 +53,7 @@ class Account(Base):
     )  # Unix timestamp
     last_synced_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
+    is_disabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
 
@@ -121,3 +123,12 @@ class Category(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
+
+
+def exclude_disabled_accounts(query):
+    """Filter a Transaction query to exclude disabled accounts."""
+    return query.where(
+        Transaction.account_id.in_(
+            sa_select(Account.id).where(Account.is_disabled == False)  # noqa: E712
+        )
+    )

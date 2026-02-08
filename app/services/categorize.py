@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clients.gemini import GeminiClient
-from app.core.config import settings
+from app.core.config import (
+    CATEGORIZE_BATCH_SIZE,
+    CATEGORIZE_CONFIDENCE_THRESHOLD,
+    CATEGORIZE_LIMIT,
+    GEMINI_CATEGORIZE_MODEL,
+)
 from app.models import Category, Transaction
 from app.schemas import (
     BatchCategorizationResponse,
@@ -87,7 +92,7 @@ async def categorize_transactions(
         query = query.where(Transaction.id.in_(transaction_ids))
     else:
         query = query.where(Transaction.category.is_(None))
-        query = query.limit(settings.categorize_limit)
+        query = query.limit(CATEGORIZE_LIMIT)
 
     result = await db.scalars(query)
     transactions = list(result.all())
@@ -105,8 +110,8 @@ async def categorize_transactions(
     categories = list(cat_result.all())
 
     system_prompt = _build_system_prompt(categories)
-    threshold = settings.categorize_confidence_threshold
-    batch_size = settings.categorize_batch_size
+    threshold = CATEGORIZE_CONFIDENCE_THRESHOLD
+    batch_size = CATEGORIZE_BATCH_SIZE
 
     all_results: list[CategorizeResult] = []
     categorized_count = 0
@@ -121,7 +126,7 @@ async def categorize_transactions(
             user_prompt,
             BatchCategorizationResponse,
             system=system_prompt,
-            model=settings.gemini_categorize_model,
+            model=GEMINI_CATEGORIZE_MODEL,
         )
 
         # Build lookup for matching

@@ -30,6 +30,11 @@ class AccountResponse(BaseModel):
     balance_date: int | None
     last_synced_at: int | None
     created_at: int
+    is_disabled: bool
+
+
+class AccountUpdate(BaseModel):
+    is_disabled: bool | None = None
 
 
 # Transactions

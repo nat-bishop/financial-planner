@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Transaction
+from app.models import Transaction, exclude_disabled_accounts
 from app.schemas import TransactionResponse, TransactionUpdate
 
 router = APIRouter()
@@ -25,6 +25,7 @@ async def list_transactions(
 ) -> list[Transaction]:
     """List transactions with optional filters."""
     query = select(Transaction).order_by(Transaction.posted_at.desc())
+    query = exclude_disabled_accounts(query)
 
     if account_id:
         query = query.where(Transaction.account_id == account_id)

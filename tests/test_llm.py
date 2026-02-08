@@ -48,7 +48,8 @@ def _seed_transactions(db, count=3):
 class TestLLMStatus:
     @pytest.mark.asyncio
     async def test_status_unconfigured(self, client):
-        resp = await client.get("/llm/status")
+        with patch("app.core.config.settings.gemini_api_key", ""):
+            resp = await client.get("/llm/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["configured"] is False
@@ -65,7 +66,11 @@ class TestLLMStatus:
 class TestCategorize:
     @pytest.mark.asyncio
     async def test_categorize_no_api_key(self, client):
-        resp = await client.post("/llm/categorize")
+        with (
+            patch("app.core.config.settings.gemini_api_key", ""),
+            patch("app.clients.gemini._client", None),
+        ):
+            resp = await client.post("/llm/categorize")
         assert resp.status_code == 400
         assert "GEMINI_API_KEY" in resp.json()["detail"]
 
@@ -192,7 +197,11 @@ class TestCategorize:
 class TestChat:
     @pytest.mark.asyncio
     async def test_chat_no_api_key(self, client):
-        resp = await client.post("/llm/chat", json={"message": "hello"})
+        with (
+            patch("app.core.config.settings.gemini_api_key", ""),
+            patch("app.clients.gemini._client", None),
+        ):
+            resp = await client.post("/llm/chat", json={"message": "hello"})
         assert resp.status_code == 400
 
     @pytest.mark.asyncio

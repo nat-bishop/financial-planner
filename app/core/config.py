@@ -19,14 +19,14 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str = ""
-    gemini_categorize_model: str = "gemini-2.0-flash"
-    gemini_temperature: float = 0.1
-    gemini_max_tokens: int = 4096
-
-    # Categorization
-    categorize_batch_size: int = 30
-    categorize_limit: int = 100
-    categorize_confidence_threshold: float = 0.7
 
 
 settings = Settings()
+
+# Application defaults — not env-overridable
+GEMINI_CATEGORIZE_MODEL = "gemini-2.0-flash"
+GEMINI_TEMPERATURE = 0.1
+GEMINI_MAX_TOKENS = 4096
+CATEGORIZE_BATCH_SIZE = 30
+CATEGORIZE_LIMIT = 100
+CATEGORIZE_CONFIDENCE_THRESHOLD = 0.7

@@ -10,6 +10,7 @@ export interface Account {
   balance_date: number | null
   last_synced_at: number | null
   created_at: number
+  is_disabled: boolean
 }
 
 export interface Transaction {

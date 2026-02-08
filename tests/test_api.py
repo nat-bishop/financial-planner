@@ -112,6 +112,45 @@ class TestAccountsEndpoint:
         response = await client.get("/accounts/nonexistent")
         assert response.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_list_accounts_excludes_disabled(self, client, db):
+        """Disabled accounts are excluded from list by default."""
+        db.add(Account(id="act_1", provider="simplefin", name="Visible"))
+        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        await db.commit()
+
+        response = await client.get("/accounts/")
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["id"] == "act_1"
+
+    @pytest.mark.asyncio
+    async def test_list_accounts_include_disabled(self, client, db):
+        """include_disabled=true returns all accounts including disabled."""
+        db.add(Account(id="act_1", provider="simplefin", name="Visible"))
+        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        await db.commit()
+
+        response = await client.get("/accounts/", params={"include_disabled": "true"})
+        data = response.json()
+        assert len(data) == 2
+
+    @pytest.mark.asyncio
+    async def test_toggle_account_disabled(self, client, db):
+        """PATCH /accounts/{id} toggles disabled state."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        await db.commit()
+
+        # Disable
+        response = await client.patch("/accounts/act_1", json={"is_disabled": True})
+        assert response.status_code == 200
+        assert response.json()["is_disabled"] is True
+
+        # Re-enable
+        response = await client.patch("/accounts/act_1", json={"is_disabled": False})
+        assert response.status_code == 200
+        assert response.json()["is_disabled"] is False
+
 
 class TestTransactionsEndpoint:
     @pytest.mark.asyncio
@@ -226,6 +265,27 @@ class TestTransactionsEndpoint:
         data = response.json()
         assert data["category"] == "Food & Dining"
         assert data["notes"] == "Morning coffee"
+
+    @pytest.mark.asyncio
+    async def test_transactions_exclude_disabled_accounts(self, client, db):
+        """Transactions from disabled accounts are excluded."""
+        db.add(Account(id="act_1", provider="simplefin", name="Visible"))
+        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        now = int(time.time())
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=now, amount=-100, description="Visible",
+        ))
+        db.add(Transaction(
+            account_id="act_2", external_id="tx2",
+            posted_at=now, amount=-200, description="Hidden",
+        ))
+        await db.commit()
+
+        response = await client.get("/transactions/")
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["description"] == "Visible"
 
 
 class TestSyncEndpoints:
@@ -397,3 +457,24 @@ class TestAnalyticsEndpoint:
         assert "Transportation" in categories
         assert categories["Transportation"]["total"] == 10000
         assert "Income" not in categories  # Positive amount excluded
+
+    @pytest.mark.asyncio
+    async def test_analytics_excludes_disabled_accounts(self, client, db):
+        """Analytics spending excludes disabled account transactions."""
+        db.add(Account(id="act_1", provider="simplefin", name="Visible"))
+        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        now = int(time.time())
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=now, amount=-5000, description="A", category="Food",
+        ))
+        db.add(Transaction(
+            account_id="act_2", external_id="tx2",
+            posted_at=now, amount=-3000, description="B", category="Food",
+        ))
+        await db.commit()
+
+        response = await client.get("/analytics/spending-by-category")
+        data = response.json()
+        categories = {c["category"]: c for c in data["categories"]}
+        assert categories["Food"]["total"] == 5000  # Only from enabled account
