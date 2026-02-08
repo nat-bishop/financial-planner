@@ -281,6 +281,38 @@ class TestTransactionsEndpoint:
         assert tx["category"] == "Uncategorized"
 
     @pytest.mark.asyncio
+    async def test_transaction_response_includes_transacted_at_and_raw_data(self, client, db):
+        """API response includes transacted_at and raw_data fields."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-100, description="Test",
+            transacted_at=1705190400,
+            raw_data='{"simplefin_id":"tx1","pending":false,"extra":{"foo":"bar"}}',
+        ))
+        await db.commit()
+
+        response = await client.get("/transactions/")
+        tx = response.json()["transactions"][0]
+        assert tx["transacted_at"] == 1705190400
+        assert tx["raw_data"] is not None
+        assert "foo" in tx["raw_data"]
+
+    @pytest.mark.asyncio
+    async def test_transaction_response_null_transacted_at(self, client, db):
+        """API response returns null transacted_at when not set."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-100, description="Test",
+        ))
+        await db.commit()
+
+        response = await client.get("/transactions/")
+        tx = response.json()["transactions"][0]
+        assert tx["transacted_at"] is None
+
+    @pytest.mark.asyncio
     async def test_filter_uncategorized(self, client, db):
         """Filter by category=Uncategorized returns only uncategorized transactions."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))

@@ -42,6 +42,8 @@ class SFTransaction:
     date: int  # Unix timestamp
     description: str
     pending: bool
+    transacted_at: int | None  # Unix timestamp (optional)
+    extra: dict | None  # Provider-specific data (optional)
 
 
 @dataclass
@@ -192,6 +194,8 @@ class SimpleFINClient:
                     date=posted,
                     description=tx_data.get("description", ""),
                     pending=pending,
+                    transacted_at=tx_data.get("transacted_at"),
+                    extra=tx_data.get("extra"),
                 )
                 transactions.append(transaction)
 

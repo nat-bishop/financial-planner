@@ -16,9 +16,14 @@
         {
           "id": "TXN_001",
           "posted": 1705276800,
+          "transacted_at": 1705190400,
           "amount": "-50.00",
           "description": "Amazon",
-          "pending": false
+          "pending": false,
+          "extra": {
+            "merchant_id": "AMZN",
+            "category_code": "5411"
+          }
         },
         {
           "id": "TXN_002",

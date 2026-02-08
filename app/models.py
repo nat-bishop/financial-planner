@@ -74,6 +74,7 @@ class Transaction(Base):
 
     # Core data (from provider)
     posted_at: Mapped[int] = mapped_column(Integer)  # Unix timestamp
+    transacted_at: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Unix timestamp (optional)
     amount: Mapped[int] = mapped_column(Integer)  # Cents (positive = deposit)
     description: Mapped[str] = mapped_column(String)
     is_pending: Mapped[bool] = mapped_column(Boolean, default=False)

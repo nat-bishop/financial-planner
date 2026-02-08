@@ -18,6 +18,7 @@ export interface Transaction {
   account_id: string
   external_id: string
   posted_at: number
+  transacted_at: number | null
   amount: number
   description: string
   is_pending: boolean
@@ -26,6 +27,7 @@ export interface Transaction {
   categorize_confidence: number | null
   tags: string | null
   notes: string | null
+  raw_data: string | null
   created_at: number
   updated_at: number | null
 }

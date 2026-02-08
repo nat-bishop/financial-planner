@@ -186,12 +186,14 @@ async def _upsert_transaction(db: AsyncSession, tx: SFTransaction) -> None:
         account_id=tx.account_id,
         external_id=tx.id,
         posted_at=tx.date,
+        transacted_at=tx.transacted_at,
         amount=tx.amount,
         description=tx.description,
         is_pending=tx.pending,
         raw_data=json.dumps({
             "simplefin_id": tx.id,
             "pending": tx.pending,
+            "extra": tx.extra,
         }),
         created_at=now,
     )
@@ -201,6 +203,7 @@ async def _upsert_transaction(db: AsyncSession, tx: SFTransaction) -> None:
         index_elements=["account_id", "external_id"],
         set_={
             "posted_at": stmt.excluded.posted_at,
+            "transacted_at": stmt.excluded.transacted_at,
             "amount": stmt.excluded.amount,
             "description": stmt.excluded.description,
             "is_pending": stmt.excluded.is_pending,

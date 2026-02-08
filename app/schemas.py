@@ -45,6 +45,7 @@ class TransactionResponse(BaseModel):
     account_id: str
     external_id: str
     posted_at: int
+    transacted_at: int | None
     amount: int
     description: str
     is_pending: bool
@@ -53,6 +54,7 @@ class TransactionResponse(BaseModel):
     categorize_confidence: float | None
     tags: str | None
     notes: str | None
+    raw_data: str | None
     created_at: int
     updated_at: int | None
 

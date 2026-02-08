@@ -83,6 +83,17 @@ function sortArrow(column: string): string {
   if (props.sortBy !== column) return ''
   return props.sortOrder === 'asc' ? ' \u2191' : ' \u2193'
 }
+
+function parsedExtra(tx: Transaction): Record<string, string> | null {
+  if (!tx.raw_data) return null
+  try {
+    const data = JSON.parse(tx.raw_data)
+    if (!data.extra || typeof data.extra !== 'object' || Object.keys(data.extra).length === 0) return null
+    return data.extra
+  } catch {
+    return null
+  }
+}
 </script>
 
 <template>
@@ -223,7 +234,29 @@ function sortArrow(column: string): string {
             <!-- Expanded detail row -->
             <tr v-if="!compact && expandedId === tx.id" class="border-b border-surface-900/4">
               <td :colspan="selectable ? 8 : 7" class="px-4 py-4 bg-surface-900/[0.02]">
-                <div class="grid grid-cols-2 gap-4 max-w-xl" @click.stop>
+                <div class="max-w-xl" @click.stop>
+                  <!-- Read-only transaction metadata -->
+                  <div
+                    v-if="tx.transacted_at || parsedExtra(tx)"
+                    class="flex flex-wrap gap-x-6 gap-y-2 pb-3 mb-4 border-b border-surface-900/6"
+                  >
+                    <div v-if="tx.transacted_at">
+                      <span class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-0.5">Transacted</span>
+                      <span class="text-xs text-surface-300">{{ formatDate(tx.transacted_at) }}</span>
+                    </div>
+                    <div v-if="tx.transacted_at">
+                      <span class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-0.5">Posted</span>
+                      <span class="text-xs text-surface-300">{{ formatDate(tx.posted_at) }}</span>
+                    </div>
+                    <template v-if="parsedExtra(tx)">
+                      <div v-for="(value, key) in parsedExtra(tx)" :key="key">
+                        <span class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-0.5">{{ key }}</span>
+                        <span class="text-xs text-surface-300 break-all">{{ value }}</span>
+                      </div>
+                    </template>
+                  </div>
+                  <!-- Editable fields -->
+                  <div class="grid grid-cols-2 gap-4">
                   <div>
                     <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Category</label>
                     <input
@@ -258,6 +291,7 @@ function sortArrow(column: string): string {
                     <span v-if="tx.categorize_confidence !== null" class="ml-auto text-[10px] font-mono text-surface-300">
                       AI confidence: <span :class="confidenceColor(tx.categorize_confidence)">{{ confidenceLabel(tx.categorize_confidence) }}</span>
                     </span>
+                  </div>
                   </div>
                 </div>
               </td>

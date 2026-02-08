@@ -119,6 +119,21 @@ class TestSimpleFINParsing:
         assert restaurant.pending is True
         assert restaurant.date > 0  # posted=0 gets substituted with current time
 
+    def test_parse_transacted_at_and_extra(self):
+        """transacted_at and extra are parsed when present, None when absent."""
+        fixture = load_simplefin_initial_fixture()
+        response = _fixture_to_sfin_response(fixture)
+
+        # TXN_001 has both fields
+        txn_001 = next(t for t in response.transactions if t.id == "TXN_001")
+        assert txn_001.transacted_at == 1705190400
+        assert txn_001.extra == {"merchant_id": "AMZN", "category_code": "5411"}
+
+        # TXN_002 has neither
+        txn_002 = next(t for t in response.transactions if t.id == "TXN_002")
+        assert txn_002.transacted_at is None
+        assert txn_002.extra is None
+
     def test_parse_errors(self):
         """Error array is captured from response."""
         fixture = load_simplefin_incremental_fixture()
@@ -177,6 +192,43 @@ class TestSyncAccounts:
 
         payroll_tx = next(t for t in transactions if t.external_id == "TXN_002")
         assert payroll_tx.amount == 150000  # income is positive
+
+    @pytest.mark.asyncio
+    async def test_sync_stores_transacted_at_and_extra(self, db):
+        """Sync stores transacted_at column and extra in raw_data."""
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.flush()
+
+        fixture = load_simplefin_initial_fixture()
+        mock_response = _fixture_to_sfin_response(fixture)
+
+        with patch("app.services.sync.SimpleFINClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
+            await sync_accounts(db)
+
+        # TXN_001 has transacted_at and extra
+        tx1 = await db.scalar(
+            select(Transaction).where(Transaction.external_id == "TXN_001")
+        )
+        assert tx1.transacted_at == 1705190400
+        raw = json.loads(tx1.raw_data)
+        assert raw["extra"]["merchant_id"] == "AMZN"
+
+        # TXN_002 has neither
+        tx2 = await db.scalar(
+            select(Transaction).where(Transaction.external_id == "TXN_002")
+        )
+        assert tx2.transacted_at is None
+        raw2 = json.loads(tx2.raw_data)
+        assert raw2["extra"] is None
 
     @pytest.mark.asyncio
     async def test_sync_stores_cursor_as_timestamp(self, db):
@@ -428,6 +480,8 @@ def _fixture_to_sfin_response(fixture: dict) -> SFSyncResponse:
                 date=posted,
                 description=tx_data.get("description", ""),
                 pending=pending,
+                transacted_at=tx_data.get("transacted_at"),
+                extra=tx_data.get("extra"),
             )
             transactions.append(transaction)
 

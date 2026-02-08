@@ -23,9 +23,13 @@
         {
           "id": "TXN_004",
           "posted": 1705363200,
+          "transacted_at": 1705276800,
           "amount": "-25.00",
           "description": "Coffee Shop",
-          "pending": false
+          "pending": false,
+          "extra": {
+            "merchant": "Blue Bottle"
+          }
         }
       ]
     }
