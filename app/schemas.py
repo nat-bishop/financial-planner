@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # Credentials
@@ -45,6 +45,7 @@ class TransactionResponse(BaseModel):
     is_pending: bool
     category: str | None
     subcategory: str | None
+    categorize_confidence: float | None
     tags: str | None
     notes: str | None
     created_at: int
@@ -98,3 +99,72 @@ class SpendingByCategoryResponse(BaseModel):
     start_date: int
     end_date: int
     categories: list[SpendingByCategory]
+
+
+# Categories
+class CategoryCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class CategoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    is_default: bool
+    created_at: int
+
+
+# LLM / Categorization
+class CategorizeRequest(BaseModel):
+    transaction_ids: list[int] | None = None
+
+
+class TransactionCategorization(BaseModel):
+    """LLM response for a single transaction."""
+
+    id: int
+    category: str
+    subcategory: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+
+
+class BatchCategorizationResponse(BaseModel):
+    """LLM response for a batch."""
+
+    transactions: list[TransactionCategorization]
+
+
+class CategorizeResult(BaseModel):
+    transaction_id: int
+    description: str
+    category: str
+    suggested_category: str
+    subcategory: str | None
+    confidence: float
+    reasoning: str
+    applied: bool
+
+
+class CategorizeResponse(BaseModel):
+    total_processed: int
+    categorized: int
+    unable_to_categorize: int
+    results: list[CategorizeResult]
+
+
+class LLMStatusResponse(BaseModel):
+    configured: bool
+    model: str
+
+
+class ChatRequest(BaseModel):
+    message: str

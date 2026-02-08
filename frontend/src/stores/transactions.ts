@@ -50,6 +50,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
   function clearFilters() {
     filters.account_id = undefined
     filters.category = undefined
+    filters.uncategorized = undefined
     filters.search = undefined
     filters.start_date = undefined
     filters.end_date = undefined

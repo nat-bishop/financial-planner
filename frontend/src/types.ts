@@ -22,6 +22,7 @@ export interface Transaction {
   is_pending: boolean
   category: string | null
   subcategory: string | null
+  categorize_confidence: number | null
   tags: string | null
   notes: string | null
   created_at: number
@@ -70,9 +71,41 @@ export interface HealthResponse {
 export interface TransactionFilters {
   account_id?: string
   category?: string
+  uncategorized?: boolean
   search?: string
   start_date?: number
   end_date?: number
   limit?: number
   offset?: number
+}
+
+export interface Category {
+  id: number
+  name: string
+  description: string | null
+  is_default: boolean
+  created_at: number
+}
+
+export interface LLMStatus {
+  configured: boolean
+  model: string
+}
+
+export interface CategorizeResult {
+  transaction_id: number
+  description: string
+  category: string
+  suggested_category: string
+  subcategory: string | null
+  confidence: number
+  reasoning: string
+  applied: boolean
+}
+
+export interface CategorizeResponse {
+  total_processed: number
+  categorized: number
+  unable_to_categorize: number
+  results: CategorizeResult[]
 }

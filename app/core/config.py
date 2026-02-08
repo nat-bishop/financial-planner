@@ -17,5 +17,16 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Gemini
+    gemini_api_key: str = ""
+    gemini_categorize_model: str = "gemini-2.0-flash"
+    gemini_temperature: float = 0.1
+    gemini_max_tokens: int = 4096
+
+    # Categorization
+    categorize_batch_size: int = 30
+    categorize_limit: int = 100
+    categorize_confidence_threshold: float = 0.7
+
 
 settings = Settings()

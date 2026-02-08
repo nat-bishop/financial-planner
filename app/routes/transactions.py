@@ -15,6 +15,7 @@ router = APIRouter()
 async def list_transactions(
     account_id: str | None = None,
     category: str | None = None,
+    uncategorized: bool = False,
     search: str | None = None,
     start_date: int | None = None,
     end_date: int | None = None,
@@ -22,22 +23,14 @@ async def list_transactions(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[Transaction]:
-    """List transactions with optional filters.
-
-    Args:
-        account_id: Filter by account ID
-        category: Filter by category
-        search: Search description (LIKE %query%)
-        start_date: Filter by posted_at >= start_date (Unix timestamp)
-        end_date: Filter by posted_at <= end_date (Unix timestamp)
-        limit: Maximum number of results (default 100)
-        offset: Number of results to skip (default 0)
-    """
+    """List transactions with optional filters."""
     query = select(Transaction).order_by(Transaction.posted_at.desc())
 
     if account_id:
         query = query.where(Transaction.account_id == account_id)
-    if category:
+    if uncategorized:
+        query = query.where(Transaction.category.is_(None))
+    elif category:
         query = query.where(Transaction.category == category)
     if search:
         query = query.where(Transaction.description.ilike(f"%{search}%"))

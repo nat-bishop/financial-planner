@@ -1,19 +1,38 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, computed } from 'vue'
+import { onMounted, ref, watch, computed, reactive } from 'vue'
 import { useTransactionsStore } from '../stores/transactions'
 import { useAccountsStore } from '../stores/accounts'
+import { useCategoriesStore } from '../stores/categories'
+import { useLLMStore } from '../stores/llm'
 import TransactionTable from '../components/TransactionTable.vue'
 
 const transactionsStore = useTransactionsStore()
 const accountsStore = useAccountsStore()
+const categoriesStore = useCategoriesStore()
+const llmStore = useLLMStore()
 
 const searchInput = ref('')
 const selectedAccount = ref('')
 const selectedCategory = ref('')
+const selectedIds = reactive(new Set<number>())
 let searchTimeout: ReturnType<typeof setTimeout>
 
+// Categorization result toast
+const catToast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
+let toastTimeout: ReturnType<typeof setTimeout>
+
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  catToast.value = { message, type }
+  clearTimeout(toastTimeout)
+  toastTimeout = setTimeout(() => { catToast.value = null }, 5000)
+}
+
 onMounted(async () => {
-  await accountsStore.fetch()
+  await Promise.all([
+    accountsStore.fetch(),
+    categoriesStore.fetch(),
+    llmStore.fetchStatus(),
+  ])
   await transactionsStore.fetch()
 })
 
@@ -34,18 +53,21 @@ watch(selectedAccount, (val) => {
 })
 
 watch(selectedCategory, (val) => {
-  transactionsStore.setFilter('category', val || undefined)
+  // Special handling for "uncategorized" filter
+  if (val === '__uncategorized__') {
+    transactionsStore.setFilter('category', undefined)
+    transactionsStore.setFilter('uncategorized', true)
+  } else {
+    transactionsStore.setFilter('uncategorized', undefined)
+    transactionsStore.setFilter('category', val || undefined)
+  }
   transactionsStore.setFilter('offset', 0)
   transactionsStore.fetch()
 })
 
-// Unique categories from current transactions
-const categories = computed(() => {
-  const cats = new Set<string>()
-  transactionsStore.transactions.forEach(tx => {
-    if (tx.category) cats.add(tx.category)
-  })
-  return Array.from(cats).sort()
+// Category list for dropdown: DB categories + special entries
+const categoryOptions = computed(() => {
+  return categoriesStore.categories.map(c => c.name)
 })
 
 function handleUpdate(id: number, data: any) {
@@ -56,6 +78,7 @@ function clearFilters() {
   searchInput.value = ''
   selectedAccount.value = ''
   selectedCategory.value = ''
+  selectedIds.clear()
   transactionsStore.clearFilters()
   transactionsStore.fetch()
 }
@@ -63,6 +86,49 @@ function clearFilters() {
 const hasFilters = computed(() => {
   return searchInput.value || selectedAccount.value || selectedCategory.value
 })
+
+// Selection
+function toggleSelect(id: number) {
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id)
+  } else {
+    selectedIds.add(id)
+  }
+}
+
+function toggleSelectAll() {
+  const allSelected = transactionsStore.transactions.every(tx => selectedIds.has(tx.id))
+  if (allSelected) {
+    transactionsStore.transactions.forEach(tx => selectedIds.delete(tx.id))
+  } else {
+    transactionsStore.transactions.forEach(tx => selectedIds.add(tx.id))
+  }
+}
+
+// Categorize actions
+async function categorizeUncategorized() {
+  const result = await llmStore.categorizeUncategorized()
+  if (result) {
+    showToast(`Categorized ${result.categorized} of ${result.total_processed} transactions`)
+    await transactionsStore.fetch()
+  } else if (llmStore.error) {
+    showToast(llmStore.error, 'error')
+  }
+}
+
+async function categorizeSelected() {
+  const ids = Array.from(selectedIds)
+  if (ids.length === 0) return
+
+  const result = await llmStore.categorizeSelected(ids)
+  if (result) {
+    showToast(`Categorized ${result.categorized} of ${result.total_processed} transactions`)
+    selectedIds.clear()
+    await transactionsStore.fetch()
+  } else if (llmStore.error) {
+    showToast(llmStore.error, 'error')
+  }
+}
 
 // Pagination
 function nextPage() {
@@ -81,6 +147,8 @@ const currentPage = computed(() => {
   const limit = transactionsStore.filters.limit || 100
   return Math.floor((transactionsStore.filters.offset || 0) / limit) + 1
 })
+
+const isConfigured = computed(() => llmStore.status?.configured ?? false)
 </script>
 
 <template>
@@ -92,9 +160,69 @@ const currentPage = computed(() => {
         <p class="text-sm text-surface-400">
           {{ transactionsStore.transactions.length }} results
           <template v-if="currentPage > 1"> &middot; Page {{ currentPage }}</template>
+          <template v-if="selectedIds.size > 0"> &middot; {{ selectedIds.size }} selected</template>
         </p>
       </div>
+
+      <!-- Categorize buttons -->
+      <div v-if="isConfigured" class="flex items-center gap-2">
+        <button
+          v-if="selectedIds.size > 0"
+          @click="categorizeSelected"
+          :disabled="llmStore.categorizing"
+          class="px-3.5 py-2 text-xs font-medium rounded-lg transition-all"
+          :class="llmStore.categorizing
+            ? 'bg-surface-200 text-surface-400 cursor-wait'
+            : 'bg-accent/10 text-accent hover:bg-accent/20'"
+        >
+          <span v-if="llmStore.categorizing" class="flex items-center gap-1.5">
+            <svg class="animate-spin w-3 h-3" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+              <path d="M14 8a6 6 0 00-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Categorizing...
+          </span>
+          <span v-else>Categorize Selected ({{ selectedIds.size }})</span>
+        </button>
+        <button
+          @click="categorizeUncategorized"
+          :disabled="llmStore.categorizing"
+          class="px-3.5 py-2 text-xs font-medium rounded-lg transition-all"
+          :class="llmStore.categorizing
+            ? 'bg-surface-200 text-surface-400 cursor-wait'
+            : 'bg-surface-100 text-surface-400 hover:text-surface-200 hover:bg-surface-200'"
+        >
+          <span v-if="llmStore.categorizing && selectedIds.size === 0" class="flex items-center gap-1.5">
+            <svg class="animate-spin w-3 h-3" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+              <path d="M14 8a6 6 0 00-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Categorizing...
+          </span>
+          <span v-else>Categorize Uncategorized</span>
+        </button>
+      </div>
     </div>
+
+    <!-- Categorize toast -->
+    <Transition
+      enter-active-class="transition-all duration-300"
+      enter-from-class="opacity-0 -translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition-all duration-200"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="catToast"
+        class="mb-4 px-4 py-2.5 rounded-lg text-xs font-medium"
+        :class="catToast.type === 'error'
+          ? 'bg-expense/10 text-expense'
+          : 'bg-income/10 text-income'"
+      >
+        {{ catToast.message }}
+      </div>
+    </Transition>
 
     <!-- Filters -->
     <div class="flex flex-wrap items-center gap-3 mb-6">
@@ -131,7 +259,9 @@ const currentPage = computed(() => {
         style="background-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path d=%22M3 5l3 3 3-3%22 fill=%22none%22 stroke=%22%23999%22 stroke-width=%221.5%22 stroke-linecap=%22round%22/></svg>'); background-repeat: no-repeat; background-position: right 8px center;"
       >
         <option value="">All categories</option>
-        <option v-for="cat in categories" :key="cat" :value="cat">
+        <option value="__uncategorized__">Uncategorized</option>
+        <option value="Unable to Categorize">Unable to Categorize</option>
+        <option v-for="cat in categoryOptions" :key="cat" :value="cat">
           {{ cat }}
         </option>
       </select>
@@ -151,7 +281,11 @@ const currentPage = computed(() => {
       <TransactionTable
         :transactions="transactionsStore.transactions"
         :loading="transactionsStore.loading"
+        :selectable="true"
+        :selectedIds="selectedIds"
         @update="handleUpdate"
+        @toggle-select="toggleSelect"
+        @toggle-select-all="toggleSelectAll"
       />
     </div>
 

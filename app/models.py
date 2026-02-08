@@ -2,6 +2,7 @@ import time
 
 from sqlalchemy import (
     Boolean,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -78,6 +79,7 @@ class Transaction(Base):
     # Enrichment (app-managed)
     category: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
+    categorize_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -107,3 +109,15 @@ class SyncLog(Base):
     raw_response: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )  # Sync response summary JSON
+
+
+class Category(Base):
+    """Category definitions for transaction categorization."""
+
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
