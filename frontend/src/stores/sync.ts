@@ -61,7 +61,7 @@ export const useSyncStore = defineStore('sync', () => {
     const api = useApi()
     try {
       health.value = await api.get<HealthResponse>('/health')
-      connected.value = health.value.last_sync_at != null
+      connected.value = health.value.has_credentials
       console.log('fetchHealth:', {
         lastSyncAt: health.value.last_sync_at,
         connected: connected.value,

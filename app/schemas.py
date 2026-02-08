@@ -80,6 +80,7 @@ class SyncError(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    has_credentials: bool
     last_sync_at: int | None
     last_sync_status: str | None
     account_count: int

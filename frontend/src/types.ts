@@ -60,6 +60,7 @@ export interface SpendingByCategoryResponse {
 
 export interface HealthResponse {
   status: string
+  has_credentials: boolean
   last_sync_at: number | null
   last_sync_status: string | null
   account_count: number
