@@ -1,6 +1,6 @@
 from cryptography.fernet import Fernet
 
-from app.config import settings
+from app.core.config import settings
 
 _fernet: Fernet | None = None
 

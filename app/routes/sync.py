@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
-from app.encryption import encrypt
+from app.clients.simplefin import SimpleFINClient
+from app.core.database import get_db
+from app.core.encryption import encrypt
 from app.models import Credential, SyncLog
 from app.schemas import CredentialCreate, CredentialResponse, SyncResponse
-from app.simplefin import SimpleFINClient
-from app.sync import sync_accounts
+from app.services.sync import sync_accounts
 
 log = logging.getLogger(__name__)
 

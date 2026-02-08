@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.encryption import encrypt
+from app.core.encryption import encrypt
 from app.models import Account, Credential, SyncLog, Transaction
 
 

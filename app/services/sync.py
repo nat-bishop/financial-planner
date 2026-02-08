@@ -9,9 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.encryption import decrypt
+from app.clients.simplefin import SFAccount, SFTransaction, SimpleFINClient
+from app.core.encryption import decrypt
 from app.models import Account, Credential, SyncLog, Transaction
-from app.simplefin import SFAccount, SFTransaction, SimpleFINClient
 
 log = logging.getLogger(__name__)
 

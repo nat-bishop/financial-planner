@@ -8,15 +8,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy import select
 
-from app.encryption import decrypt, encrypt
-from app.models import Account, Credential, SyncLog, Transaction
-from app.simplefin import (
+from app.clients.simplefin import (
     SFAccount,
     SFSyncResponse,
     SFTransaction,
     _sfin_amount_to_cents,
 )
-from app.sync import sync_accounts
+from app.core.encryption import decrypt, encrypt
+from app.models import Account, Credential, SyncLog, Transaction
+from app.services.sync import sync_accounts
 
 # Load fixture data
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -147,7 +147,7 @@ class TestSyncAccounts:
         fixture = load_simplefin_initial_fixture()
         mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.SimpleFINClient") as MockClient:
+        with patch("app.services.sync.SimpleFINClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
@@ -196,7 +196,7 @@ class TestSyncAccounts:
 
         before = int(time.time())
 
-        with patch("app.sync.SimpleFINClient") as MockClient:
+        with patch("app.services.sync.SimpleFINClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
             await sync_accounts(db)
@@ -221,7 +221,7 @@ class TestSyncAccounts:
         fixture = load_simplefin_incremental_fixture()
         mock_response = _fixture_to_sfin_response(fixture)
 
-        with patch("app.sync.SimpleFINClient") as MockClient:
+        with patch("app.services.sync.SimpleFINClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
             sync_log = await sync_accounts(db)
@@ -246,7 +246,7 @@ class TestSyncAccounts:
         fixture1 = load_simplefin_initial_fixture()
         mock_response1 = _fixture_to_sfin_response(fixture1)
 
-        with patch("app.sync.SimpleFINClient") as MockClient:
+        with patch("app.services.sync.SimpleFINClient") as MockClient:
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response1)
             await sync_accounts(db)
@@ -265,8 +265,8 @@ class TestSyncAccounts:
 
         # Need to remove rate limit check for this test
         with (
-            patch("app.sync.SimpleFINClient") as MockClient,
-            patch("app.sync.MAX_SYNCS_PER_DAY", 999),
+            patch("app.services.sync.SimpleFINClient") as MockClient,
+            patch("app.services.sync.MAX_SYNCS_PER_DAY", 999),
         ):
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response2)
@@ -309,8 +309,8 @@ class TestSyncAccounts:
         mock_response = _fixture_to_sfin_response(fixture)
 
         with (
-            patch("app.sync.SimpleFINClient") as MockClient,
-            patch("app.sync.MAX_SYNCS_PER_DAY", 999),
+            patch("app.services.sync.SimpleFINClient") as MockClient,
+            patch("app.services.sync.MAX_SYNCS_PER_DAY", 999),
         ):
             mock_instance = MockClient.return_value
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)

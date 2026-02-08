@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Set test encryption key before importing app modules
 os.environ["ENCRYPTION_KEY"] = "eBKqFlbjULz6MZKcre8TswaoEFBrG8pGBmFXlOT6MOs="
 
-from app.database import get_db
+from app.core.database import get_db
 from app.main import app
 from app.models import Base
 
