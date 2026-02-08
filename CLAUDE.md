@@ -64,18 +64,18 @@ app/
 ├── routes/                    # Thin HTTP handlers
 │   ├── accounts.py, analytics.py, health.py, sync.py, transactions.py
 │   ├── categories.py          # Category CRUD
-│   └── llm.py                 # LLM status, categorize, chat endpoints
+│   └── llm.py                 # LLM status + categorize endpoints
 ```
 
 **Layer rules:** `core/` = infrastructure, `clients/` = pure HTTP (no DB), `services/` = business logic, `routes/` = thin handlers.
 
 ### Key Modules
 - `app/clients/simplefin.py` — Async SimpleFIN Bridge client using `httpx.AsyncClient`. Dataclasses: `SFAccount`, `SFTransaction`, `SFSyncResponse`. Amount parsing via `decimal.Decimal` for precision.
-- `app/clients/gemini.py` — Gemini client with `generate()`, `generate_structured()` (Pydantic response_schema + retry), `stream()`. Singleton via `get_gemini_client()`.
+- `app/clients/gemini.py` — Gemini client with `generate_structured()` (Pydantic response_schema + retry). Singleton via `get_gemini_client()`.
 - `app/services/sync.py` — Sync orchestration: date-range query, upserts via `insert().on_conflict_do_update()`, `_sync_lock` mutex, rate limit enforcement.
 - `app/services/categorize.py` — Batch categorization: builds prompt from Category table, calls Gemini structured output, applies confidence threshold.
-- `app/routes/llm.py` — `GET /llm/status`, `POST /llm/categorize`, `POST /llm/chat` (SSE streaming).
-- `app/routes/categories.py` — Category CRUD. DELETE nullifies transactions with that category.
+- `app/routes/llm.py` — `GET /llm/status`, `POST /llm/categorize`.
+- `app/routes/categories.py` — Category list, create, delete. DELETE nullifies transactions with that category.
 - `app/core/database.py` — Session factory with auto-commit on success, auto-rollback on exception (via `get_db` dependency).
 - `app/core/config.py` — Pydantic settings from `.env`. See `.env.example` for required vars.
 
