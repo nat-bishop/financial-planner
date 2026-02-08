@@ -10,6 +10,7 @@ from app.clients.gemini import GeminiClient, get_gemini_client
 from app.core.config import GEMINI_CATEGORIZE_MODEL, settings
 from app.core.database import get_db
 from app.models import Account, Transaction, exclude_disabled_accounts
+from app.prompts import render
 from app.schemas import (
     CategorizeRequest,
     CategorizeResponse,
@@ -91,24 +92,23 @@ async def chat(
     spending_rows = spending_result.all()
 
     # Build system prompt with financial context
-    account_summary = "\n".join(
-        f"- {a.name} ({a.org_name or 'Unknown'}): ${(a.balance_current or 0) / 100:.2f}"
+    account_data = [
+        {
+            "name": a.name,
+            "org_name": a.org_name or "Unknown",
+            "balance": a.balance_current or 0,
+        }
         for a in account_list
-    ) or "No accounts connected."
-
-    spending_summary = "\n".join(
-        f"- {row.category or 'Uncategorized'}: ${abs(row.total) / 100:.2f} ({row.count} transactions)"
+    ]
+    spending_data = [
+        {
+            "category": row.category or "Uncategorized",
+            "total": abs(row.total),
+            "count": row.count,
+        }
         for row in spending_rows
-    ) or "No spending data."
-
-    system = f"""You are a helpful personal finance assistant. Answer questions about the user's finances.
-Be concise and practical. Use the financial context below to inform your answers.
-
-Account Summary:
-{account_summary}
-
-Last 30 Days Spending:
-{spending_summary}"""
+    ]
+    system = render("chat.j2", accounts=account_data, spending=spending_data)
 
     async def event_stream():
         try:

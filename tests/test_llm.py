@@ -241,14 +241,14 @@ class TestTransactionFilters:
         )
         tx2 = Transaction(
             account_id="acc-f", external_id="f-2", posted_at=now,
-            amount=-200, description="Uncategorized", created_at=now,
+            amount=-200, description="Uncategorized", category="Uncategorized", created_at=now,
         )
         db.add_all([tx1, tx2])
         await db.flush()
 
-        resp = await client.get("/transactions/", params={"uncategorized": "true"})
+        resp = await client.get("/transactions/", params={"category": "Uncategorized"})
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["transactions"]
         assert len(data) == 1
         assert data[0]["description"] == "Uncategorized"
 
@@ -271,6 +271,6 @@ class TestTransactionFilters:
 
         resp = await client.get("/transactions/", params={"category": "Unable to Categorize"})
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["transactions"]
         assert len(data) == 1
         assert data[0]["category"] == "Unable to Categorize"

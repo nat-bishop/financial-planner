@@ -186,16 +186,16 @@ class TestTransactionsEndpoint:
         # List all
         response = await client.get("/transactions/")
         assert response.status_code == 200
-        assert len(response.json()) == 2
+        assert len(response.json()["transactions"]) == 2
 
         # Filter by category
         response = await client.get("/transactions/", params={"category": "Food"})
-        assert len(response.json()) == 1
-        assert response.json()[0]["description"] == "Coffee"
+        assert len(response.json()["transactions"]) == 1
+        assert response.json()["transactions"][0]["description"] == "Coffee"
 
         # Filter by account
         response = await client.get("/transactions/", params={"account_id": "act_1"})
-        assert len(response.json()) == 2
+        assert len(response.json()["transactions"]) == 2
 
     @pytest.mark.asyncio
     async def test_search_transactions(self, client, db):
@@ -227,15 +227,15 @@ class TestTransactionsEndpoint:
         # Search for "coffee" (case insensitive)
         response = await client.get("/transactions/", params={"search": "coffee"})
         assert response.status_code == 200
-        assert len(response.json()) == 2
+        assert len(response.json()["transactions"]) == 2
 
         # Search for "amazon"
         response = await client.get("/transactions/", params={"search": "amazon"})
-        assert len(response.json()) == 1
+        assert len(response.json()["transactions"]) == 1
 
         # No results
         response = await client.get("/transactions/", params={"search": "walmart"})
-        assert len(response.json()) == 0
+        assert len(response.json()["transactions"]) == 0
 
     @pytest.mark.asyncio
     async def test_update_transaction(self, client, db):
@@ -283,9 +283,137 @@ class TestTransactionsEndpoint:
         await db.commit()
 
         response = await client.get("/transactions/")
-        data = response.json()
+        data = response.json()["transactions"]
         assert len(data) == 1
         assert data[0]["description"] == "Visible"
+
+    @pytest.mark.asyncio
+    async def test_transaction_default_category(self, client, db):
+        """Transactions default to 'Uncategorized' category."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-100, description="Test",
+        ))
+        await db.commit()
+
+        response = await client.get("/transactions/")
+        tx = response.json()["transactions"][0]
+        assert tx["category"] == "Uncategorized"
+
+    @pytest.mark.asyncio
+    async def test_filter_uncategorized(self, client, db):
+        """Filter by category=Uncategorized returns only uncategorized transactions."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-100, description="No Cat",
+        ))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx2",
+            posted_at=int(time.time()), amount=-200, description="Has Cat",
+            category="Food",
+        ))
+        await db.commit()
+
+        response = await client.get("/transactions/", params={"category": "Uncategorized"})
+        data = response.json()
+        assert len(data["transactions"]) == 1
+        assert data["transactions"][0]["description"] == "No Cat"
+
+    @pytest.mark.asyncio
+    async def test_list_transactions_returns_aggregates(self, client, db):
+        """List transactions returns total_count, total_income, total_expenses."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        now = int(time.time())
+        db.add_all([
+            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="Expense 1"),
+            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-3000, description="Expense 2"),
+            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=10000, description="Income 1"),
+        ])
+        await db.commit()
+
+        response = await client.get("/transactions/")
+        data = response.json()
+        assert data["total_count"] == 3
+        assert data["total_income"] == 10000
+        assert data["total_expenses"] == 8000
+
+    @pytest.mark.asyncio
+    async def test_list_transactions_sorting(self, client, db):
+        """List transactions supports sorting by different columns."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        now = int(time.time())
+        db.add_all([
+            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="Banana"),
+            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-3000, description="Apple"),
+            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=-8000, description="Cherry"),
+        ])
+        await db.commit()
+
+        # Sort by description asc
+        response = await client.get("/transactions/", params={"sort_by": "description", "sort_order": "asc"})
+        txns = response.json()["transactions"]
+        assert txns[0]["description"] == "Apple"
+        assert txns[1]["description"] == "Banana"
+        assert txns[2]["description"] == "Cherry"
+
+        # Sort by amount desc (least negative first = largest amount)
+        response = await client.get("/transactions/", params={"sort_by": "amount", "sort_order": "desc"})
+        txns = response.json()["transactions"]
+        assert txns[0]["amount"] == -3000
+        assert txns[2]["amount"] == -8000
+
+    @pytest.mark.asyncio
+    async def test_sort_by_account_name(self, client, db):
+        """Sort by account name uses JOIN to Account table."""
+        db.add(Account(id="act_a", provider="simplefin", name="Alpha Bank"))
+        db.add(Account(id="act_z", provider="simplefin", name="Zeta Bank"))
+        now = int(time.time())
+        db.add(Transaction(account_id="act_z", external_id="tx1", posted_at=now, amount=-100, description="From Z"))
+        db.add(Transaction(account_id="act_a", external_id="tx2", posted_at=now, amount=-200, description="From A"))
+        await db.commit()
+
+        response = await client.get("/transactions/", params={"sort_by": "account", "sort_order": "asc"})
+        txns = response.json()["transactions"]
+        assert txns[0]["description"] == "From A"
+        assert txns[1]["description"] == "From Z"
+
+    @pytest.mark.asyncio
+    async def test_transaction_ids_endpoint(self, client, db):
+        """GET /transactions/ids returns all matching IDs."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        now = int(time.time())
+        db.add_all([
+            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-100, description="A"),
+            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-200, description="B"),
+            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=-300, description="C"),
+        ])
+        await db.commit()
+
+        response = await client.get("/transactions/ids")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["ids"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_transaction_ids_filtered(self, client, db):
+        """GET /transactions/ids respects category filter."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        now = int(time.time())
+        db.add_all([
+            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-100, description="A", category="Food"),
+            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-200, description="B"),
+        ])
+        await db.commit()
+
+        response = await client.get("/transactions/ids", params={"category": "Uncategorized"})
+        data = response.json()
+        assert len(data["ids"]) == 1
+
+        response = await client.get("/transactions/ids", params={"category": "Food"})
+        data = response.json()
+        assert len(data["ids"]) == 1
 
 
 class TestSyncEndpoints:
@@ -478,3 +606,31 @@ class TestAnalyticsEndpoint:
         data = response.json()
         categories = {c["category"]: c for c in data["categories"]}
         assert categories["Food"]["total"] == 5000  # Only from enabled account
+
+
+class TestCategorizeEndpoint:
+    @pytest.mark.asyncio
+    async def test_categorize_no_categories_guard(self, client, db):
+        """POST /llm/categorize returns error when no categories exist."""
+        from app.clients.gemini import GeminiClient
+        from app.routes.llm import _get_client
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        # Create uncategorized transaction (no categories in DB)
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-100, description="Test",
+        ))
+        await db.commit()
+
+        response = await client.post("/llm/categorize")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_processed"] == 0
+        assert data["error"] == "No categories configured. Add categories before running categorization."
+
+        del app.dependency_overrides[_get_client]

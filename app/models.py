@@ -79,7 +79,7 @@ class Transaction(Base):
     is_pending: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Enrichment (app-managed)
-    category: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String, nullable=False, default="Uncategorized", server_default="Uncategorized", index=True)
     subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
     categorize_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array

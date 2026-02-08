@@ -1,37 +1,36 @@
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Transaction, exclude_disabled_accounts
-from app.schemas import TransactionResponse, TransactionUpdate
+from app.models import Account, Transaction, exclude_disabled_accounts
+from app.schemas import (
+    TransactionIdsResponse,
+    TransactionListResponse,
+    TransactionResponse,
+    TransactionUpdate,
+)
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[TransactionResponse])
-async def list_transactions(
+def _build_filters(
+    query,
     account_id: str | None = None,
     category: str | None = None,
-    uncategorized: bool = False,
     search: str | None = None,
     start_date: int | None = None,
     end_date: int | None = None,
-    limit: int = Query(default=100, le=1000),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-) -> list[Transaction]:
-    """List transactions with optional filters."""
-    query = select(Transaction).order_by(Transaction.posted_at.desc())
+):
+    """Apply shared filter conditions to a Transaction query."""
     query = exclude_disabled_accounts(query)
 
     if account_id:
         query = query.where(Transaction.account_id == account_id)
-    if uncategorized:
-        query = query.where(Transaction.category.is_(None))
-    elif category:
+    if category:
         query = query.where(Transaction.category == category)
     if search:
         query = query.where(Transaction.description.ilike(f"%{search}%"))
@@ -40,10 +39,88 @@ async def list_transactions(
     if end_date is not None:
         query = query.where(Transaction.posted_at <= end_date)
 
-    query = query.offset(offset).limit(limit)
+    return query
+
+
+@router.get("/", response_model=TransactionListResponse)
+async def list_transactions(
+    account_id: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    start_date: int | None = None,
+    end_date: int | None = None,
+    sort_by: Literal["date", "description", "category", "amount", "account"] = "date",
+    sort_order: Literal["asc", "desc"] = "desc",
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """List transactions with optional filters, sorting, and aggregates."""
+    # Data query
+    data_query = select(Transaction)
+    data_query = _build_filters(data_query, account_id, category, search, start_date, end_date)
+
+    # Sorting
+    sort_map = {
+        "date": Transaction.posted_at,
+        "description": Transaction.description,
+        "category": Transaction.category,
+        "amount": Transaction.amount,
+    }
+    if sort_by == "account":
+        data_query = data_query.join(Account, Transaction.account_id == Account.id)
+        sort_col = Account.name
+    else:
+        sort_col = sort_map[sort_by]
+
+    if sort_order == "asc":
+        data_query = data_query.order_by(sort_col.asc())
+    else:
+        data_query = data_query.order_by(sort_col.desc())
+
+    data_query = data_query.offset(offset).limit(limit)
+
+    # Aggregate query (same filters, no limit/offset)
+    agg_query = select(
+        func.count(Transaction.id).label("total_count"),
+        func.coalesce(
+            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)), 0
+        ).label("total_income"),
+        func.coalesce(
+            func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)), 0
+        ).label("total_expenses"),
+    )
+    agg_query = _build_filters(agg_query, account_id, category, search, start_date, end_date)
+
+    # Execute both
+    result = await db.scalars(data_query)
+    transactions = list(result.all())
+
+    agg_result = (await db.execute(agg_query)).one()
+
+    return {
+        "transactions": transactions,
+        "total_count": agg_result.total_count,
+        "total_income": agg_result.total_income,
+        "total_expenses": agg_result.total_expenses,
+    }
+
+
+@router.get("/ids", response_model=TransactionIdsResponse)
+async def list_transaction_ids(
+    account_id: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    start_date: int | None = None,
+    end_date: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all matching transaction IDs (no pagination)."""
+    query = select(Transaction.id)
+    query = _build_filters(query, account_id, category, search, start_date, end_date)
 
     result = await db.scalars(query)
-    return list(result.all())
+    return {"ids": list(result.all())}
 
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)

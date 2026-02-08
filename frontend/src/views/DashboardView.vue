@@ -16,7 +16,7 @@ const syncStore = useSyncStore()
 onMounted(async () => {
   await Promise.all([
     accountsStore.fetch(),
-    transactionsStore.fetch({ limit: 10 }),
+    transactionsStore.fetchRecent(10),
     syncStore.fetchHealth(),
   ])
 })

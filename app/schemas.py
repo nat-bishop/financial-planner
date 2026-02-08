@@ -48,13 +48,24 @@ class TransactionResponse(BaseModel):
     amount: int
     description: str
     is_pending: bool
-    category: str | None
+    category: str
     subcategory: str | None
     categorize_confidence: float | None
     tags: str | None
     notes: str | None
     created_at: int
     updated_at: int | None
+
+
+class TransactionListResponse(BaseModel):
+    transactions: list[TransactionResponse]
+    total_count: int
+    total_income: int
+    total_expenses: int
+
+
+class TransactionIdsResponse(BaseModel):
+    ids: list[int]
 
 
 class TransactionUpdate(BaseModel):
@@ -164,6 +175,7 @@ class CategorizeResponse(BaseModel):
     categorized: int
     unable_to_categorize: int
     results: list[CategorizeResult]
+    error: str | None = None
 
 
 class LLMStatusResponse(BaseModel):

@@ -125,6 +125,6 @@ class TestCategoryEndpoints:
         # Delete category
         await client.delete(f"/categories/{cat_id}")
 
-        # Verify transaction category is nullified
+        # Verify transaction category is reset to Uncategorized
         resp = await client.get(f"/transactions/{tx.id}")
-        assert resp.json()["category"] is None
+        assert resp.json()["category"] == "Uncategorized"

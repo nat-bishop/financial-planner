@@ -21,7 +21,7 @@ export interface Transaction {
   amount: number
   description: string
   is_pending: boolean
-  category: string | null
+  category: string
   subcategory: string | null
   categorize_confidence: number | null
   tags: string | null
@@ -35,6 +35,17 @@ export interface TransactionUpdate {
   subcategory?: string | null
   tags?: string | null
   notes?: string | null
+}
+
+export interface TransactionListResponse {
+  transactions: Transaction[]
+  total_count: number
+  total_income: number
+  total_expenses: number
+}
+
+export interface TransactionIdsResponse {
+  ids: number[]
 }
 
 export interface SyncLog {
@@ -72,10 +83,11 @@ export interface HealthResponse {
 export interface TransactionFilters {
   account_id?: string
   category?: string
-  uncategorized?: boolean
   search?: string
   start_date?: number
   end_date?: number
+  sort_by?: 'date' | 'description' | 'category' | 'amount' | 'account'
+  sort_order?: 'asc' | 'desc'
   limit?: number
   offset?: number
 }
@@ -109,4 +121,5 @@ export interface CategorizeResponse {
   categorized: number
   unable_to_categorize: number
   results: CategorizeResult[]
+  error: string | null
 }

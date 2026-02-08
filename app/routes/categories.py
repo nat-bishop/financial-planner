@@ -82,12 +82,12 @@ async def delete_category(
     if category.is_default:
         raise HTTPException(status_code=400, detail="Cannot delete default categories")
 
-    # Null out category on affected transactions
+    # Reset category on affected transactions
     result = await db.scalars(
         select(Transaction).where(Transaction.category == category.name)
     )
     for tx in result.all():
-        tx.category = None
+        tx.category = "Uncategorized"
         tx.subcategory = None
         tx.categorize_confidence = None
 

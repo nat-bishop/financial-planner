@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Application defaults — not env-overridable
-GEMINI_CATEGORIZE_MODEL = "gemini-2.0-flash"
+GEMINI_CATEGORIZE_MODEL = "gemini-3-flash-preview"
 GEMINI_TEMPERATURE = 0.1
 GEMINI_MAX_TOKENS = 4096
 CATEGORIZE_BATCH_SIZE = 30
