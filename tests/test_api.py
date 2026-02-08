@@ -92,27 +92,6 @@ class TestAccountsEndpoint:
         assert len(response.json()) == 2
 
     @pytest.mark.asyncio
-    async def test_get_account(self, client, db):
-        """Get specific account by ID."""
-        account = Account(
-            id="act_1",
-            provider="simplefin",
-            name="Chase Checking",
-        )
-        db.add(account)
-        await db.commit()
-
-        response = await client.get("/accounts/act_1")
-        assert response.status_code == 200
-        assert response.json()["id"] == "act_1"
-
-    @pytest.mark.asyncio
-    async def test_get_account_not_found(self, client):
-        """Get nonexistent account returns 404."""
-        response = await client.get("/accounts/nonexistent")
-        assert response.status_code == 404
-
-    @pytest.mark.asyncio
     async def test_list_accounts_excludes_disabled(self, client, db):
         """Disabled accounts are excluded from list by default."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))

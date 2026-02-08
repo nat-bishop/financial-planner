@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
 from typing import TypeVar
 
 from google import genai
@@ -43,26 +42,6 @@ class GeminiClient:
     def is_configured(self) -> bool:
         return bool(settings.gemini_api_key)
 
-    async def generate(
-        self,
-        prompt: str,
-        *,
-        system: str | None = None,
-        model: str | None = None,
-        max_tokens: int | None = None,
-    ) -> str:
-        """Generate a text response."""
-        response = await self._client.aio.models.generate_content(
-            model=model or self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                temperature=self._temperature,
-                max_output_tokens=max_tokens or self._max_tokens,
-            ),
-        )
-        return response.text or ""
-
     async def generate_structured(
         self,
         prompt: str,
@@ -98,28 +77,6 @@ class GeminiClient:
         raise RuntimeError(
             f"Structured output failed after {max_retries} retries: {last_error}"
         )
-
-    async def stream(
-        self,
-        prompt: str,
-        *,
-        system: str | None = None,
-        model: str | None = None,
-    ) -> AsyncGenerator[str, None]:
-        """Stream a text response as chunks."""
-        response = await self._client.aio.models.generate_content_stream(
-            model=model or self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                temperature=self._temperature,
-                max_output_tokens=self._max_tokens,
-            ),
-        )
-        async for chunk in response:
-            if chunk.text:
-                yield chunk.text
-
 
 def get_gemini_client() -> GeminiClient:
     """Get or create the singleton GeminiClient."""

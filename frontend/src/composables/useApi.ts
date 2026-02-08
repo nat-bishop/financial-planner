@@ -105,46 +105,7 @@ export function useApi() {
     }
   }
 
-  async function* stream(path: string, body: any): AsyncGenerator<string> {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(BASE + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(parseDetail(data.detail, res.status))
-      }
-
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-
-      const decoder = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const text = decoder.decode(value, { stream: true })
-        for (const line of text.split('\n')) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') return
-            yield data
-          }
-        }
-      }
-    } catch (e: any) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
-  }
-
-  return { loading, error, get, post, patch, del, stream }
+  return { loading, error, get, post, patch, del }
 }
 
 /** Format cents as currency string */

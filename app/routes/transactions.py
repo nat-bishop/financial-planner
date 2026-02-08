@@ -123,18 +123,6 @@ async def list_transaction_ids(
     return {"ids": list(result.all())}
 
 
-@router.get("/{transaction_id}", response_model=TransactionResponse)
-async def get_transaction(
-    transaction_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> Transaction:
-    """Get a specific transaction by ID."""
-    transaction = await db.get(Transaction, transaction_id)
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return transaction
-
-
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
 async def update_transaction(
     transaction_id: int,

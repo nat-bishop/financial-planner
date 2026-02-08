@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import Category, Transaction
-from app.schemas import CategoryCreate, CategoryResponse, CategoryUpdate
+from app.schemas import CategoryCreate, CategoryResponse
 
 router = APIRouter()
 
@@ -35,35 +35,6 @@ async def create_category(
     category = Category(name=data.name, description=data.description)
     db.add(category)
     await db.flush()
-    return category
-
-
-@router.patch("/{category_id}", response_model=CategoryResponse)
-async def update_category(
-    category_id: int,
-    data: CategoryUpdate,
-    db: AsyncSession = Depends(get_db),
-) -> Category:
-    """Update a category's name or description."""
-    category = await db.get(Category, category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
-
-    update_data = data.model_dump(exclude_unset=True)
-    if "name" in update_data:
-        # Check uniqueness
-        existing = await db.scalar(
-            select(Category).where(
-                Category.name == update_data["name"],
-                Category.id != category_id,
-            )
-        )
-        if existing:
-            raise HTTPException(status_code=400, detail="Category name already exists")
-
-    for field, value in update_data.items():
-        setattr(category, field, value)
-
     return category
 
 

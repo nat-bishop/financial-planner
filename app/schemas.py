@@ -123,11 +123,6 @@ class CategoryCreate(BaseModel):
     description: str | None = None
 
 
-class CategoryUpdate(BaseModel):
-    name: str | None = None
-    description: str | None = None
-
-
 class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -183,5 +178,3 @@ class LLMStatusResponse(BaseModel):
     model: str
 
 
-class ChatRequest(BaseModel):
-    message: str

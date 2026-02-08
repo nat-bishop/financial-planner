@@ -24,18 +24,6 @@ async def list_accounts(
     return list(result.all())
 
 
-@router.get("/{account_id}", response_model=AccountResponse)
-async def get_account(
-    account_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> Account:
-    """Get a specific account by ID."""
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return account
-
-
 @router.patch("/{account_id}", response_model=AccountResponse)
 async def update_account(
     account_id: str,

@@ -194,40 +194,6 @@ class TestCategorize:
             app.dependency_overrides.pop(_get_client, None)
 
 
-class TestChat:
-    @pytest.mark.asyncio
-    async def test_chat_no_api_key(self, client):
-        with (
-            patch("app.core.config.settings.gemini_api_key", ""),
-            patch("app.clients.gemini._client", None),
-        ):
-            resp = await client.post("/llm/chat", json={"message": "hello"})
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_chat_streams(self, client, db):
-        mock_client = AsyncMock(spec=GeminiClient)
-
-        async def mock_stream(*args, **kwargs):
-            yield "Hello "
-            yield "World"
-
-        mock_client.stream = mock_stream
-
-        app.dependency_overrides[_get_client] = lambda: mock_client
-
-        try:
-            resp = await client.post("/llm/chat", json={"message": "hello"})
-            assert resp.status_code == 200
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            body = resp.text
-            assert "Hello " in body
-            assert "World" in body
-            assert "[DONE]" in body
-        finally:
-            app.dependency_overrides.pop(_get_client, None)
-
-
 class TestTransactionFilters:
     @pytest.mark.asyncio
     async def test_filter_uncategorized(self, client, db):

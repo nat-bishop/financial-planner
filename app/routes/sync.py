@@ -3,7 +3,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,13 +105,3 @@ async def trigger_sync(
         raise HTTPException(status_code=500, detail=str(e)) from None
 
 
-@router.get("/history", response_model=list[SyncResponse])
-async def get_sync_history(
-    limit: int = Query(default=10, le=100),
-    db: AsyncSession = Depends(get_db),
-) -> list[SyncLog]:
-    """Get sync operation history."""
-    result = await db.scalars(
-        select(SyncLog).order_by(SyncLog.started_at.desc()).limit(limit)
-    )
-    return list(result.all())

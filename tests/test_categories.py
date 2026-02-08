@@ -43,34 +43,6 @@ class TestCategoryEndpoints:
         assert names == ["A Category", "B Category"]  # sorted
 
     @pytest.mark.asyncio
-    async def test_update_category(self, client):
-        create_resp = await client.post("/categories/", json={"name": "Old"})
-        cat_id = create_resp.json()["id"]
-
-        resp = await client.patch(
-            f"/categories/{cat_id}",
-            json={"name": "New", "description": "Updated"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["name"] == "New"
-        assert resp.json()["description"] == "Updated"
-
-    @pytest.mark.asyncio
-    async def test_update_category_not_found(self, client):
-        resp = await client.patch("/categories/999", json={"name": "X"})
-        assert resp.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_update_category_duplicate_name(self, client):
-        await client.post("/categories/", json={"name": "Cat1"})
-        create2 = await client.post("/categories/", json={"name": "Cat2"})
-        cat2_id = create2.json()["id"]
-
-        resp = await client.patch(f"/categories/{cat2_id}", json={"name": "Cat1"})
-        assert resp.status_code == 400
-        assert "already exists" in resp.json()["detail"]
-
-    @pytest.mark.asyncio
     async def test_delete_category(self, client):
         create_resp = await client.post("/categories/", json={"name": "ToDelete"})
         cat_id = create_resp.json()["id"]
@@ -126,5 +98,7 @@ class TestCategoryEndpoints:
         await client.delete(f"/categories/{cat_id}")
 
         # Verify transaction category is reset to Uncategorized
-        resp = await client.get(f"/transactions/{tx.id}")
-        assert resp.json()["category"] == "Uncategorized"
+        resp = await client.get("/transactions/", params={"search": "Test tx"})
+        txns = resp.json()["transactions"]
+        assert len(txns) == 1
+        assert txns[0]["category"] == "Uncategorized"
