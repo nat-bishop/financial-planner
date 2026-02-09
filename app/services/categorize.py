@@ -1,9 +1,10 @@
-"""Batch transaction categorization using Gemini."""
+"""Batch transaction categorization using Gemini with category memory."""
 
 import logging
 import time
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,7 +15,13 @@ from app.core.config import (
     CATEGORIZE_LIMIT,
     GEMINI_CATEGORIZE_MODEL,
 )
-from app.models import Category, Transaction
+from app.models import (
+    Account,
+    Category,
+    CategoryMemory,
+    Transaction,
+    normalize_description,
+)
 from app.prompts import render_parts
 from app.schemas import (
     BatchCategorizationResponse,
@@ -45,17 +52,129 @@ def _prepare_transactions(transactions: list[Transaction]) -> list[dict]:
     return items
 
 
+async def apply_memory_rules(
+    db: AsyncSession,
+    transactions: list[Transaction],
+) -> tuple[list[Transaction], list[Transaction]]:
+    """Apply category memory to transactions.
+
+    Returns (matched, unmatched) — matched transactions are updated in-place.
+    """
+    if not transactions:
+        return [], []
+
+    # Build lookup: (normalized_pattern, account_id) -> memory entry
+    patterns = {}
+    for tx in transactions:
+        key = (normalize_description(tx.description), tx.account_id)
+        patterns[key] = patterns.get(key, [])
+        patterns[key].append(tx)
+
+    # Fetch all matching memory entries in one query
+    pattern_values = list({k[0] for k in patterns})
+    account_values = list({k[1] for k in patterns})
+
+    result = await db.scalars(
+        select(CategoryMemory).where(
+            CategoryMemory.normalized_pattern.in_(pattern_values),
+            CategoryMemory.account_id.in_(account_values),
+        )
+    )
+    memory_entries = {
+        (m.normalized_pattern, m.account_id): m for m in result.all()
+    }
+
+    matched = []
+    unmatched = []
+    now = int(time.time())
+
+    for tx in transactions:
+        key = (normalize_description(tx.description), tx.account_id)
+        memory = memory_entries.get(key)
+        if memory:
+            tx.category = memory.category
+            tx.subcategory = memory.subcategory
+            tx.categorize_confidence = None  # Memory match, not LLM
+            tx.updated_at = now
+            matched.append(tx)
+        else:
+            unmatched.append(tx)
+
+    return matched, unmatched
+
+
+async def cache_llm_results(
+    db: AsyncSession,
+    transactions: list[Transaction],
+) -> None:
+    """Cache LLM categorization results into category_memory.
+
+    Uses INSERT ... ON CONFLICT DO NOTHING — user corrections are never overwritten.
+    """
+    now = int(time.time())
+    for tx in transactions:
+        if tx.category and tx.category not in ("Uncategorized", UNABLE_TO_CATEGORIZE):
+            pattern = normalize_description(tx.description)
+            stmt = insert(CategoryMemory).values(
+                normalized_pattern=pattern,
+                account_id=tx.account_id,
+                category=tx.category,
+                subcategory=tx.subcategory,
+                created_at=now,
+            )
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["normalized_pattern", "account_id"],
+            )
+            await db.execute(stmt)
+
+
+async def _fetch_memory_context(
+    db: AsyncSession,
+    account_ids: list[str],
+) -> list[dict]:
+    """Fetch category memory entries for prompt context (few-shot examples).
+
+    Returns up to 50 most recently updated entries for the given accounts.
+    """
+    query = (
+        select(CategoryMemory)
+        .where(CategoryMemory.account_id.in_(account_ids))
+        .order_by(
+            CategoryMemory.updated_at.desc().nullslast(),
+            CategoryMemory.created_at.desc(),
+        )
+        .limit(50)
+    )
+    result = await db.scalars(query)
+    entries = result.all()
+
+    # Fetch account names for display
+    acct_result = await db.scalars(
+        select(Account).where(Account.id.in_(account_ids))
+    )
+    acct_names = {a.id: a.name for a in acct_result.all()}
+
+    return [
+        {
+            "pattern": e.normalized_pattern,
+            "account_name": acct_names.get(e.account_id, "Unknown"),
+            "category": e.category,
+            "subcategory": e.subcategory,
+        }
+        for e in entries
+    ]
+
+
 async def categorize_transactions(
     db: AsyncSession,
     client: GeminiClient,
     transaction_ids: list[int] | None = None,
 ) -> CategorizeResponse:
-    """Categorize transactions using Gemini.
+    """Categorize transactions using memory matching + Gemini fallback.
 
-    Args:
-        db: Database session
-        client: GeminiClient instance
-        transaction_ids: Specific IDs to categorize, or None for uncategorized
+    1. Apply category memory (deterministic, free)
+    2. Send unmatched to LLM in batches
+    3. Cache LLM results into memory
     """
     # Fetch transactions
     query = (
@@ -76,83 +195,119 @@ async def categorize_transactions(
             total_processed=0,
             categorized=0,
             unable_to_categorize=0,
+            memory_matched=0,
             results=[],
         )
 
-    # Fetch categories for the prompt
-    cat_result = await db.scalars(select(Category).order_by(Category.name))
-    categories = list(cat_result.all())
+    # Step 1: Deterministic memory matching
+    matched, unmatched = await apply_memory_rules(db, transactions)
+    memory_matched_count = len(matched)
 
-    if not categories:
-        return CategorizeResponse(
-            total_processed=0,
-            categorized=0,
-            unable_to_categorize=0,
-            results=[],
-            error="No categories configured. Add categories before running categorization.",
+    # Record memory matches as results
+    all_results: list[CategorizeResult] = [
+        CategorizeResult(
+            transaction_id=tx.id,
+            description=tx.description,
+            category=tx.category,
+            suggested_category=tx.category,
+            subcategory=tx.subcategory,
+            confidence=1.0,
+            reasoning="Matched from category memory",
+            applied=True,
         )
+        for tx in matched
+    ]
 
-    threshold = CATEGORIZE_CONFIDENCE_THRESHOLD
-    batch_size = CATEGORIZE_BATCH_SIZE
-
-    all_results: list[CategorizeResult] = []
-    categorized_count = 0
+    # Step 2: LLM categorization for unmatched
+    categorized_count = memory_matched_count
     unable_count = 0
 
-    # Process in batches (sequential to respect rate limits)
-    for i in range(0, len(transactions), batch_size):
-        batch = transactions[i : i + batch_size]
-        tx_data = _prepare_transactions(batch)
-        system_prompt, user_prompt = render_parts(
-            "categorize.j2", categories=categories, transactions=tx_data,
-        )
+    if unmatched:
+        # Fetch categories for the prompt
+        cat_result = await db.scalars(select(Category).order_by(Category.name))
+        categories = list(cat_result.all())
 
-        llm_response = await client.generate_structured(
-            user_prompt,
-            BatchCategorizationResponse,
-            system=system_prompt,
-            model=GEMINI_CATEGORIZE_MODEL,
-        )
-
-        # Build lookup for matching
-        tx_map = {tx.id: tx for tx in batch}
-
-        for item in llm_response.transactions:
-            tx = tx_map.get(item.id)
-            if not tx:
-                log.warning("LLM returned unknown transaction ID %d", item.id)
-                continue
-
-            applied = item.confidence >= threshold
-            if applied:
-                tx.category = item.category
-                tx.subcategory = item.subcategory
-                tx.categorize_confidence = item.confidence
-                categorized_count += 1
-            else:
-                tx.category = UNABLE_TO_CATEGORIZE
-                tx.subcategory = None
-                tx.categorize_confidence = item.confidence
-                unable_count += 1
-
-            tx.updated_at = int(time.time())
-
-            all_results.append(
-                CategorizeResult(
-                    transaction_id=tx.id,
-                    description=tx.description,
-                    category=tx.category,
-                    suggested_category=item.category,
-                    subcategory=item.subcategory,
-                    confidence=item.confidence,
-                    reasoning=item.reasoning,
-                    applied=applied,
-                )
+        if not categories:
+            return CategorizeResponse(
+                total_processed=memory_matched_count,
+                categorized=memory_matched_count,
+                unable_to_categorize=0,
+                memory_matched=memory_matched_count,
+                results=all_results,
+                error="No categories configured. Add categories before running categorization.",
             )
+
+        # Fetch memory context for prompt enhancement
+        account_ids = list({tx.account_id for tx in unmatched})
+        memory_context = await _fetch_memory_context(db, account_ids)
+
+        threshold = CATEGORIZE_CONFIDENCE_THRESHOLD
+        batch_size = CATEGORIZE_BATCH_SIZE
+
+        llm_categorized: list[Transaction] = []
+
+        # Process in batches (sequential to respect rate limits)
+        for i in range(0, len(unmatched), batch_size):
+            batch = unmatched[i : i + batch_size]
+            tx_data = _prepare_transactions(batch)
+            system_prompt, user_prompt = render_parts(
+                "categorize.j2",
+                categories=categories,
+                transactions=tx_data,
+                memory_entries=memory_context,
+            )
+
+            llm_response = await client.generate_structured(
+                user_prompt,
+                BatchCategorizationResponse,
+                system=system_prompt,
+                model=GEMINI_CATEGORIZE_MODEL,
+            )
+
+            # Build lookup for matching
+            tx_map = {tx.id: tx for tx in batch}
+
+            for item in llm_response.transactions:
+                tx = tx_map.get(item.id)
+                if not tx:
+                    log.warning("LLM returned unknown transaction ID %d", item.id)
+                    continue
+
+                applied = item.confidence >= threshold
+                if applied:
+                    tx.category = item.category
+                    tx.subcategory = item.subcategory
+                    tx.categorize_confidence = item.confidence
+                    categorized_count += 1
+                    llm_categorized.append(tx)
+                else:
+                    tx.category = UNABLE_TO_CATEGORIZE
+                    tx.subcategory = None
+                    tx.categorize_confidence = item.confidence
+                    unable_count += 1
+
+                tx.updated_at = int(time.time())
+
+                all_results.append(
+                    CategorizeResult(
+                        transaction_id=tx.id,
+                        description=tx.description,
+                        category=tx.category,
+                        suggested_category=item.category,
+                        subcategory=item.subcategory,
+                        confidence=item.confidence,
+                        reasoning=item.reasoning,
+                        applied=applied,
+                    )
+                )
+
+        # Step 3: Cache LLM results into memory
+        await cache_llm_results(db, llm_categorized)
 
     return CategorizeResponse(
         total_processed=len(all_results),
         categorized=categorized_count,
         unable_to_categorize=unable_count,
+        memory_matched=memory_matched_count,
         results=all_results,
     )

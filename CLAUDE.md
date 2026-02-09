@@ -49,7 +49,7 @@ alembic revision --autogenerate -m "description"  # Create migration
 ```
 app/
 ├── main.py                    # App assembly
-├── models.py                  # SQLAlchemy models (Credential, Account, Transaction, SyncLog, Category)
+├── models.py                  # SQLAlchemy models (Credential, Account, Transaction, SyncLog, Category, CategoryMemory)
 ├── schemas.py                 # Pydantic schemas
 ├── core/                      # Shared infrastructure
 │   ├── config.py              # Pydantic settings from .env
@@ -73,7 +73,7 @@ app/
 - `app/clients/simplefin.py` — Async SimpleFIN Bridge client using `httpx.AsyncClient`. Dataclasses: `SFAccount`, `SFTransaction`, `SFSyncResponse`. Amount parsing via `decimal.Decimal` for precision.
 - `app/clients/gemini.py` — Gemini client with `generate_structured()` (Pydantic response_schema + retry). Singleton via `get_gemini_client()`.
 - `app/services/sync.py` — Sync orchestration: date-range query, upserts via `insert().on_conflict_do_update()`, `_sync_lock` mutex, rate limit enforcement.
-- `app/services/categorize.py` — Batch categorization: builds prompt from Category table, calls Gemini structured output, applies confidence threshold.
+- `app/services/categorize.py` — Batch categorization with category memory: deterministic matching (`apply_memory_rules()`) before LLM, caches LLM results (`cache_llm_results()`), few-shot prompt context from memory entries.
 - `app/routes/llm.py` — `GET /llm/status`, `POST /llm/categorize`.
 - `app/routes/categories.py` — Category list, create, delete. DELETE nullifies transactions with that category.
 - `app/core/database.py` — Session factory with auto-commit on success, auto-rollback on exception (via `get_db` dependency).
@@ -85,8 +85,9 @@ app/
 - **Upsert field split:** On conflict, `posted_at`, `amount`, `description`, `is_pending`, `raw_data` are overwritten. `category`, `subcategory`, `tags`, `notes` are preserved. This is what makes user edits survive re-syncs.
 - **No transaction removal:** SimpleFIN doesn't report removed transactions.
 - **Setup tokens are one-time use.** A 403 on claim means the token was already used — get a new one.
-- **Category states:** `category IS NULL` = uncategorized (never attempted). `category = "Unable to Categorize"` + `categorize_confidence IS NOT NULL` = LLM tried, below threshold. `category = "Food & Dining"` + `categorize_confidence = 0.92` = LLM categorized. `category = "Food & Dining"` + `categorize_confidence IS NULL` = user manually set.
+- **Category states:** `category = "Uncategorized"` = not yet categorized. `category = "Unable to Categorize"` + `categorize_confidence IS NOT NULL` = LLM tried, below threshold. `category = "Food & Dining"` + `categorize_confidence = 0.92` = LLM categorized. `category = "Food & Dining"` + `categorize_confidence IS NULL` = user manually set or memory-matched.
 - **Confidence threshold** is evaluated only at categorize time. Changing `CATEGORIZE_CONFIDENCE_THRESHOLD` does NOT retroactively change existing categorizations.
+- **Category memory:** `category_memory` table remembers `(normalized_pattern, account_id) → (category, subcategory)`. User corrections upsert (always win). LLM results insert-if-absent (never overwrite). `normalize_description()` strips trailing dates, ref numbers, and normalizes whitespace. On sync, memory rules auto-apply to new uncategorized transactions (no LLM). On categorize, memory matching runs before LLM, and LLM results are cached after.
 
 ### Frontend
 - Vite proxies `/api/*` → backend (strips `/api` prefix). Default target `http://localhost:8000` for local dev; Docker sets `VITE_API_URL=http://backend:<port>` via compose environment.
@@ -106,7 +107,7 @@ app/
 ## Migrations
 
 - **Alembic is the sole schema manager** — no `create_all()` at startup.
-- `001_initial.py` = base schema. `002_add_categories_and_confidence.py` = categories table + `categorize_confidence` column + 16 default categories seeded.
+- `001_initial.py` = base schema. `002_add_categories_and_confidence.py` = categories table + `categorize_confidence` column + 16 default categories seeded. `007_add_category_memory.py` = `category_memory` table for description pattern → category mapping.
 - Docker Compose runs `alembic upgrade head` explicitly before starting uvicorn.
 - The backend lifespan handler also attempts auto-migration on startup, but silently skips errors (belt-and-suspenders).
 

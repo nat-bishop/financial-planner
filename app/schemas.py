@@ -1,6 +1,16 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# Credential input validation (per-provider)
+class SimpleFINCredentialInput(BaseModel):
+    setup_token: str = Field(min_length=1)
+
+
+class NelnetCredentialInput(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
 # Credentials
 class CredentialResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -138,6 +148,7 @@ class HealthResponse(BaseModel):
     last_sync_status: str | None
     account_count: int
     recent_errors: list[SyncError]
+    warnings: list[str] = []
 
 
 # Analytics
@@ -205,6 +216,7 @@ class CategorizeResponse(BaseModel):
     total_processed: int
     categorized: int
     unable_to_categorize: int
+    memory_matched: int = 0
     results: list[CategorizeResult]
     error: str | None = None
 

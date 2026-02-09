@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.encryption import encrypt
-from app.models import Account, Credential, SyncLog, Transaction
+from app.models import (
+    Account,
+    CategoryMemory,
+    Credential,
+    SyncLog,
+    Transaction,
+    normalize_description,
+)
 
 
 class TestHealthEndpoint:
@@ -51,6 +58,39 @@ class TestHealthEndpoint:
         simplefin = next(p for p in data["providers"] if p["provider"] == "simplefin")
         assert simplefin["connected"] is False
         assert simplefin["display_name"] == "SimpleFIN Bridge"
+
+
+    @pytest.mark.asyncio
+    async def test_health_includes_warnings_field(self, client):
+        """Health endpoint includes warnings list."""
+        response = await client.get("/health")
+        data = response.json()
+        assert "warnings" in data
+        assert isinstance(data["warnings"], list)
+
+    @pytest.mark.asyncio
+    async def test_health_warns_on_non_localhost_http(self, client):
+        """Health endpoint warns about HTTP on non-localhost."""
+        # Test client base_url is http://test (non-localhost)
+        response = await client.get("/health")
+        data = response.json()
+        assert len(data["warnings"]) == 1
+        assert "HTTPS" in data["warnings"][0]
+
+    @pytest.mark.asyncio
+    async def test_health_no_warning_on_localhost(self, client, db):
+        """Health endpoint does not warn about HTTP on localhost."""
+        from httpx import ASGITransport, AsyncClient
+
+        from app.main import app as test_app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=test_app),
+            base_url="http://localhost",
+        ) as localhost_client:
+            response = await localhost_client.get("/health")
+            data = response.json()
+            assert data["warnings"] == []
 
 
 class TestAccountsEndpoint:
@@ -519,6 +559,43 @@ class TestProviderEndpoints:
         assert response.status_code == 404
 
 
+    @pytest.mark.asyncio
+    async def test_store_nelnet_credentials_empty_body_returns_422(self, client):
+        """POST /providers/nelnet/credentials with {} returns 422."""
+        response = await client.post(
+            "/providers/nelnet/credentials",
+            json={},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_store_nelnet_credentials_empty_username_returns_422(self, client):
+        """POST /providers/nelnet/credentials with empty username returns 422."""
+        response = await client.post(
+            "/providers/nelnet/credentials",
+            json={"username": "", "password": "secret"},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_store_simplefin_credentials_empty_token_returns_422(self, client):
+        """POST /providers/simplefin/credentials with empty token returns 422."""
+        response = await client.post(
+            "/providers/simplefin/credentials",
+            json={"setup_token": ""},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_store_simplefin_credentials_missing_token_returns_422(self, client):
+        """POST /providers/simplefin/credentials with missing token returns 422."""
+        response = await client.post(
+            "/providers/simplefin/credentials",
+            json={},
+        )
+        assert response.status_code == 422
+
+
 class TestSyncEndpoints:
     @pytest.mark.asyncio
     async def test_trigger_sync_all(self, client, db):
@@ -736,5 +813,571 @@ class TestCategorizeEndpoint:
         data = response.json()
         assert data["total_processed"] == 0
         assert data["error"] == "No categories configured. Add categories before running categorization."
+
+        del app.dependency_overrides[_get_client]
+
+
+class TestNormalizeDescription:
+    def test_basic_lowercase_strip(self):
+        assert normalize_description("  STARBUCKS COFFEE  ") == "starbucks coffee"
+
+    def test_trailing_date_mm_dd(self):
+        assert normalize_description("PAYMENT 01/15") == "payment"
+
+    def test_trailing_date_mm_dd_yy(self):
+        assert normalize_description("PAYMENT 01/15/26") == "payment"
+
+    def test_trailing_date_mm_dd_yyyy(self):
+        assert normalize_description("PAYMENT 01/15/2026") == "payment"
+
+    def test_trailing_ref_number(self):
+        assert normalize_description("ACH DEPOSIT #123456789") == "ach deposit"
+
+    def test_trailing_ref_number_no_hash(self):
+        assert normalize_description("ACH DEPOSIT 123456789") == "ach deposit"
+
+    def test_collapse_whitespace(self):
+        assert normalize_description("STARBUCKS   COFFEE   SHOP") == "starbucks coffee shop"
+
+    def test_short_numbers_preserved(self):
+        """Short trailing numbers (< 6 digits) are preserved."""
+        assert normalize_description("STORE 1234") == "store 1234"
+
+    def test_no_change_for_clean_description(self):
+        assert normalize_description("starbucks coffee") == "starbucks coffee"
+
+
+class TestCategoryMemory:
+    @pytest.mark.asyncio
+    async def test_correction_creates_memory_entry(self, client, db):
+        """PATCH with category change creates a category_memory entry."""
+        db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-5000,
+            description="BILT PAYMENT 01/15",
+        )
+        db.add(tx)
+        await db.commit()
+
+        response = await client.patch(
+            f"/transactions/{tx.id}",
+            json={"category": "Housing", "subcategory": "Rent"},
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] == "Housing"
+        assert response.json()["categorize_confidence"] is None
+
+        # Verify memory entry was created
+        from sqlalchemy import select
+        result = await db.scalar(
+            select(CategoryMemory).where(
+                CategoryMemory.normalized_pattern == "bilt payment",
+                CategoryMemory.account_id == "act_1",
+            )
+        )
+        assert result is not None
+        assert result.category == "Housing"
+        assert result.subcategory == "Rent"
+
+    @pytest.mark.asyncio
+    async def test_user_correction_overwrites_existing_entry(self, client, db):
+        """User correction overwrites an existing memory entry."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-5000,
+            description="BILT PAYMENT",
+        )
+        db.add(tx)
+        # Pre-existing memory entry (from LLM cache)
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Bills",
+            subcategory=None,
+        ))
+        await db.commit()
+
+        # User corrects to Housing
+        response = await client.patch(
+            f"/transactions/{tx.id}",
+            json={"category": "Housing", "subcategory": "Rent"},
+        )
+        assert response.status_code == 200
+
+        from sqlalchemy import select
+        result = await db.scalar(
+            select(CategoryMemory).where(
+                CategoryMemory.normalized_pattern == "bilt payment",
+                CategoryMemory.account_id == "act_1",
+            )
+        )
+        assert result.category == "Housing"
+        assert result.subcategory == "Rent"
+
+    @pytest.mark.asyncio
+    async def test_uncategorized_deletes_memory_entry(self, client, db):
+        """Setting category to 'Uncategorized' deletes the memory entry."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-5000,
+            description="BILT PAYMENT", category="Housing",
+        )
+        db.add(tx)
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Housing",
+        ))
+        await db.commit()
+
+        response = await client.patch(
+            f"/transactions/{tx.id}",
+            json={"category": "Uncategorized"},
+        )
+        assert response.status_code == 200
+
+        from sqlalchemy import func, select
+        count = await db.scalar(
+            select(func.count()).select_from(CategoryMemory).where(
+                CategoryMemory.normalized_pattern == "bilt payment",
+                CategoryMemory.account_id == "act_1",
+            )
+        )
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_memory_match_before_llm(self, client, db):
+        """Categorize applies memory matches before calling LLM."""
+        from app.clients.gemini import GeminiClient
+        from app.routes.llm import _get_client
+
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Housing",
+            subcategory="Rent",
+        ))
+        db.add(Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-150000,
+            description="BILT PAYMENT 01/15",
+        ))
+        await db.commit()
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        response = await client.post("/llm/categorize")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_matched"] == 1
+        assert data["categorized"] == 1
+        assert data["results"][0]["category"] == "Housing"
+        assert data["results"][0]["reasoning"] == "Matched from category memory"
+
+        # LLM should NOT have been called (all matched by memory)
+        mock_client.generate_structured.assert_not_called()
+
+        del app.dependency_overrides[_get_client]
+
+    @pytest.mark.asyncio
+    async def test_llm_results_cached_in_memory(self, client, db):
+        """LLM categorization results get cached in category_memory."""
+        from app.clients.gemini import GeminiClient
+        from app.models import Category
+        from app.routes.llm import _get_client
+        from app.schemas import BatchCategorizationResponse, TransactionCategorization
+
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Category(name="Food & Dining", description="Restaurants and food"))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-500,
+            description="SQ *JOES COFFEE",
+        )
+        db.add(tx)
+        await db.commit()
+
+        mock_response = BatchCategorizationResponse(transactions=[
+            TransactionCategorization(
+                id=tx.id,
+                category="Food & Dining",
+                subcategory="Coffee",
+                confidence=0.95,
+                reasoning="Coffee shop purchase",
+            ),
+        ])
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(return_value=mock_response)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        response = await client.post("/llm/categorize")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["categorized"] == 1
+        assert data["memory_matched"] == 0
+
+        # Verify LLM result was cached
+        from sqlalchemy import select
+        result = await db.scalar(
+            select(CategoryMemory).where(
+                CategoryMemory.normalized_pattern == "sq *joes coffee",
+                CategoryMemory.account_id == "act_1",
+            )
+        )
+        assert result is not None
+        assert result.category == "Food & Dining"
+        assert result.subcategory == "Coffee"
+
+        del app.dependency_overrides[_get_client]
+
+    @pytest.mark.asyncio
+    async def test_llm_cache_does_not_overwrite_user_correction(self, client, db):
+        """LLM's ON CONFLICT DO NOTHING preserves user corrections."""
+        from app.clients.gemini import GeminiClient
+        from app.models import Category
+        from app.routes.llm import _get_client
+        from app.schemas import BatchCategorizationResponse, TransactionCategorization
+
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Category(name="Shopping", description="Shopping"))
+        db.add(Category(name="Food & Dining", description="Food"))
+        # Pre-existing user correction
+        db.add(CategoryMemory(
+            normalized_pattern="sq *joes coffee",
+            account_id="act_1",
+            category="Shopping",
+            subcategory="Office Supplies",
+        ))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-500,
+            description="SQ *JOES COFFEE",
+        )
+        db.add(tx)
+        await db.commit()
+
+        # LLM says Food & Dining, but memory match should kick in first
+        mock_response = BatchCategorizationResponse(transactions=[
+            TransactionCategorization(
+                id=tx.id,
+                category="Food & Dining",
+                subcategory="Coffee",
+                confidence=0.95,
+                reasoning="Coffee shop",
+            ),
+        ])
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(return_value=mock_response)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        response = await client.post("/llm/categorize")
+        data = response.json()
+        # Should have been matched by memory, not LLM
+        assert data["memory_matched"] == 1
+        assert data["results"][0]["category"] == "Shopping"
+
+        # Memory entry should still be Shopping (not overwritten by LLM)
+        from sqlalchemy import select
+        result = await db.scalar(
+            select(CategoryMemory).where(
+                CategoryMemory.normalized_pattern == "sq *joes coffee",
+                CategoryMemory.account_id == "act_1",
+            )
+        )
+        assert result.category == "Shopping"
+
+        del app.dependency_overrides[_get_client]
+
+    @pytest.mark.asyncio
+    async def test_confidence_null_on_manual_correction(self, client, db):
+        """Manual category change sets categorize_confidence to NULL."""
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-500,
+            description="Test", category="Food",
+            categorize_confidence=0.92,
+        )
+        db.add(tx)
+        await db.commit()
+
+        response = await client.patch(
+            f"/transactions/{tx.id}",
+            json={"category": "Shopping"},
+        )
+        assert response.status_code == 200
+        assert response.json()["categorize_confidence"] is None
+
+    @pytest.mark.asyncio
+    async def test_second_categorize_all_from_memory(self, client, db):
+        """After initial LLM run, second run on same descriptions hits memory."""
+        from app.clients.gemini import GeminiClient
+        from app.models import Category
+        from app.routes.llm import _get_client
+        from app.schemas import BatchCategorizationResponse, TransactionCategorization
+
+        db.add(Account(id="act_1", provider="simplefin", name="Test"))
+        db.add(Category(name="Food & Dining"))
+        tx1 = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-500,
+            description="SQ *JOES COFFEE",
+        )
+        db.add(tx1)
+        await db.commit()
+
+        mock_response = BatchCategorizationResponse(transactions=[
+            TransactionCategorization(
+                id=tx1.id, category="Food & Dining", subcategory="Coffee",
+                confidence=0.95, reasoning="Coffee",
+            ),
+        ])
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(return_value=mock_response)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        # First run: LLM called
+        await client.post("/llm/categorize")
+        assert mock_client.generate_structured.call_count == 1
+
+        # Add new transaction with same description
+        tx2 = Transaction(
+            account_id="act_1", external_id="tx2",
+            posted_at=int(time.time()), amount=-500,
+            description="SQ *JOES COFFEE",
+        )
+        db.add(tx2)
+        await db.commit()
+
+        # Second run: should hit memory, LLM not called again
+        response = await client.post("/llm/categorize")
+        data = response.json()
+        assert data["memory_matched"] == 1
+        assert data["categorized"] == 1
+        # LLM call count should still be 1 (not called again)
+        assert mock_client.generate_structured.call_count == 1
+
+        del app.dependency_overrides[_get_client]
+
+    @pytest.mark.asyncio
+    async def test_memory_scoped_to_account(self, client, db):
+        """Memory entries are scoped per account_id."""
+        db.add(Account(id="act_1", provider="simplefin", name="Chase"))
+        db.add(Account(id="act_2", provider="simplefin", name="Amex"))
+        db.add(CategoryMemory(
+            normalized_pattern="payment",
+            account_id="act_1",
+            category="Housing",
+        ))
+        # Same description on different account — should NOT match
+        tx = Transaction(
+            account_id="act_2", external_id="tx1",
+            posted_at=int(time.time()), amount=-5000,
+            description="PAYMENT",
+        )
+        db.add(tx)
+        await db.commit()
+
+        from app.clients.gemini import GeminiClient
+        from app.models import Category
+        from app.routes.llm import _get_client
+        from app.schemas import BatchCategorizationResponse, TransactionCategorization
+
+        db.add(Category(name="Bills"))
+        await db.commit()
+
+        mock_response = BatchCategorizationResponse(transactions=[
+            TransactionCategorization(
+                id=tx.id, category="Bills", confidence=0.9, reasoning="Bill payment",
+            ),
+        ])
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(return_value=mock_response)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        response = await client.post("/llm/categorize")
+        data = response.json()
+        # Should NOT have been memory-matched (different account)
+        assert data["memory_matched"] == 0
+        assert data["categorized"] == 1
+
+        del app.dependency_overrides[_get_client]
+
+
+class TestSyncAutoApplyMemory:
+    @pytest.mark.asyncio
+    async def test_sync_auto_applies_memory(self, client, db):
+        """New transactions matching memory entries get auto-categorized on sync."""
+        from app.providers.models import (
+            ProviderAccount,
+            ProviderTransaction,
+            SyncResult,
+        )
+
+        # Set up credential and memory entry
+        cred = Credential(
+            id="cred_1", provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Housing",
+            subcategory="Rent",
+        ))
+        await db.commit()
+
+        mock_result = SyncResult(
+            accounts=[ProviderAccount(
+                id="act_1", name="Chase Checking", currency="USD",
+                balance_current=500000,
+            )],
+            transactions=[ProviderTransaction(
+                id="tx_new", account_id="act_1",
+                date=int(time.time()), amount=-150000,
+                description="BILT PAYMENT 02/01", pending=False,
+            )],
+            errors=[], raw_json="{}",
+        )
+        mock_provider = AsyncMock()
+        mock_provider.provider_name = "simplefin"
+        mock_provider.display_name = "SimpleFIN Bridge"
+        mock_provider.max_syncs_per_day = 24
+        mock_provider.sync = AsyncMock(return_value=mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            response = await client.post("/sync/")
+
+        assert response.status_code == 202
+
+        # Check the transaction was auto-categorized
+        tx_response = await client.get("/transactions/")
+        txns = tx_response.json()["transactions"]
+        assert len(txns) == 1
+        assert txns[0]["category"] == "Housing"
+        assert txns[0]["subcategory"] == "Rent"
+        assert txns[0]["categorize_confidence"] is None
+
+    @pytest.mark.asyncio
+    async def test_sync_preserves_existing_category(self, client, db):
+        """Re-synced transaction with existing category is not overwritten by memory."""
+        from app.providers.models import (
+            ProviderAccount,
+            ProviderTransaction,
+            SyncResult,
+        )
+
+        cred = Credential(
+            id="cred_1", provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        db.add(Account(id="act_1", provider="simplefin", name="Chase"))
+        # Existing transaction already categorized
+        db.add(Transaction(
+            account_id="act_1", external_id="tx_existing",
+            posted_at=int(time.time()), amount=-150000,
+            description="BILT PAYMENT 01/01", category="Bills",
+        ))
+        # Memory says Housing
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Housing",
+        ))
+        await db.commit()
+
+        mock_result = SyncResult(
+            accounts=[ProviderAccount(id="act_1", name="Chase", currency="USD", balance_current=500000)],
+            transactions=[ProviderTransaction(
+                id="tx_existing", account_id="act_1",
+                date=int(time.time()), amount=-150000,
+                description="BILT PAYMENT 01/01", pending=False,
+            )],
+            errors=[], raw_json="{}",
+        )
+        mock_provider = AsyncMock()
+        mock_provider.provider_name = "simplefin"
+        mock_provider.display_name = "SimpleFIN Bridge"
+        mock_provider.max_syncs_per_day = 24
+        mock_provider.sync = AsyncMock(return_value=mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            await client.post("/sync/")
+
+        # Transaction should still be "Bills" — memory only applies to "Uncategorized"
+        tx_response = await client.get("/transactions/")
+        txns = tx_response.json()["transactions"]
+        assert txns[0]["category"] == "Bills"
+
+
+class TestPromptMemoryContext:
+    @pytest.mark.asyncio
+    async def test_prompt_includes_memory_entries(self, client, db):
+        """LLM prompt includes memory entries as few-shot examples."""
+        from app.clients.gemini import GeminiClient
+        from app.models import Category
+        from app.routes.llm import _get_client
+        from app.schemas import BatchCategorizationResponse, TransactionCategorization
+
+        db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
+        db.add(Category(name="Housing"))
+        db.add(Category(name="Food & Dining"))
+        db.add(CategoryMemory(
+            normalized_pattern="bilt payment",
+            account_id="act_1",
+            category="Housing",
+            subcategory="Rent",
+        ))
+        # Transaction that won't match memory (different description)
+        tx = Transaction(
+            account_id="act_1", external_id="tx1",
+            posted_at=int(time.time()), amount=-500,
+            description="NEW RESTAURANT",
+        )
+        db.add(tx)
+        await db.commit()
+
+        mock_response = BatchCategorizationResponse(transactions=[
+            TransactionCategorization(
+                id=tx.id, category="Food & Dining", confidence=0.9, reasoning="Restaurant",
+            ),
+        ])
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(return_value=mock_response)
+        app = client._transport.app
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        await client.post("/llm/categorize")
+
+        # Verify the prompt contained memory entries
+        call_args = mock_client.generate_structured.call_args
+        user_prompt = call_args.args[0]
+        system_prompt = call_args.kwargs.get("system", "")
+        full_prompt = system_prompt + user_prompt
+        assert "bilt payment" in full_prompt
+        assert "Housing" in full_prompt
+        assert "Rent" in full_prompt
+        assert "Chase Checking" in full_prompt
 
         del app.dependency_overrides[_get_client]

@@ -1,6 +1,6 @@
 # Finance Planner
 
-Personal finance app that syncs your bank accounts via [SimpleFIN Bridge](https://bridge.simplefin.org).
+Personal finance app that syncs your bank accounts via [SimpleFIN Bridge](https://bridge.simplefin.org). Features smart transaction categorization that learns from your corrections.
 
 ## Quick Start
 
@@ -68,8 +68,13 @@ make lint            # Lint with ruff
 | `/accounts/{id}` | GET | Get single account |
 | `/transactions/` | GET | List transactions (with filters + search) |
 | `/transactions/{id}` | GET | Get single transaction |
-| `/transactions/{id}` | PATCH | Update category/tags/notes |
+| `/transactions/{id}` | PATCH | Update category/tags/notes (also trains category memory) |
 | `/analytics/spending-by-category` | GET | Spending totals by category |
+| `/llm/status` | GET | LLM configuration status |
+| `/llm/categorize` | POST | Auto-categorize transactions (memory matching + LLM fallback) |
+| `/providers/` | GET | List providers with connection status |
+| `/providers/{name}/credentials` | POST | Store provider credentials |
+| `/providers/{name}/credentials` | DELETE | Remove provider credentials |
 
 ## Configuration
 
@@ -81,8 +86,20 @@ Environment variables (see `.env.example`):
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///./data/finance.db` | Database connection string |
 | `BACKEND_PORT` | No | `8000` | Backend port (Docker) |
 | `FRONTEND_PORT` | No | `5173` | Frontend port (Docker) |
+| `GEMINI_API_KEY` | No | - | Gemini API key for LLM categorization |
 
 SimpleFIN needs no env vars — the setup token is provided via the UI.
+
+## Smart Categorization
+
+The app learns from your corrections to auto-categorize future transactions:
+
+1. **Correct a transaction** — PATCH a transaction's category, and the app remembers that description pattern
+2. **Auto-categorize** — When you click "Auto-Categorize", matching descriptions are instantly categorized from memory; only unknown descriptions go to the LLM
+3. **Sync auto-apply** — New transactions matching known patterns are categorized automatically on sync, no LLM needed
+4. **LLM gets smarter** — Your corrections are injected as few-shot examples in the LLM prompt, improving accuracy for similar transactions
+
+Memory entries are scoped per account, so "PAYMENT" on your credit card can map to a different category than "PAYMENT" on your checking account.
 
 ## Tech Stack
 

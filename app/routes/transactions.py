@@ -2,11 +2,18 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Account, Transaction, exclude_disabled_accounts
+from app.models import (
+    Account,
+    CategoryMemory,
+    Transaction,
+    exclude_disabled_accounts,
+    normalize_description,
+)
 from app.schemas import (
     TransactionIdsResponse,
     TransactionListResponse,
@@ -132,6 +139,7 @@ async def update_transaction(
     """Update transaction metadata (category, tags, notes).
 
     Only the fields provided in the request body will be updated.
+    When category is changed, updates category_memory for future auto-matching.
     """
     transaction = await db.get(Transaction, transaction_id)
     if not transaction:
@@ -139,8 +147,44 @@ async def update_transaction(
 
     update_data = update.model_dump(exclude_unset=True)
     if update_data:
+        category_changed = "category" in update_data
+        new_category = update_data.get("category")
+
         for field, value in update_data.items():
             setattr(transaction, field, value)
         transaction.updated_at = int(time.time())
+
+        # On category change: reset confidence and update memory
+        if category_changed:
+            transaction.categorize_confidence = None
+            pattern = normalize_description(transaction.description)
+
+            if new_category == "Uncategorized":
+                # Delete memory entry — stop auto-applying this pattern
+                await db.execute(
+                    delete(CategoryMemory).where(
+                        CategoryMemory.normalized_pattern == pattern,
+                        CategoryMemory.account_id == transaction.account_id,
+                    )
+                )
+            else:
+                # Upsert memory entry — user correction always wins
+                now = int(time.time())
+                stmt = insert(CategoryMemory).values(
+                    normalized_pattern=pattern,
+                    account_id=transaction.account_id,
+                    category=new_category,
+                    subcategory=update_data.get("subcategory"),
+                    created_at=now,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["normalized_pattern", "account_id"],
+                    set_={
+                        "category": stmt.excluded.category,
+                        "subcategory": stmt.excluded.subcategory,
+                        "updated_at": now,
+                    },
+                )
+                await db.execute(stmt)
 
     return transaction

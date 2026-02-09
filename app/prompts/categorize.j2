@@ -10,6 +10,14 @@ Categories:
 {% for cat in categories -%}
 - {{ cat.name }}{% if cat.description %}: {{ cat.description }}{% endif %}
 {% endfor %}
+{% if memory_entries %}
+The user has established these categorization preferences:
+{% for entry in memory_entries -%}
+- "{{ entry.pattern }}" ({{ entry.account_name }}) → {{ entry.category }}{% if entry.subcategory %} > {{ entry.subcategory }}{% endif %}
+{% endfor %}
+Apply these preferences to similar transactions.
+
+{% endif %}
 For each transaction return:
 - category: exactly one category name from the list above
 - subcategory: a more specific label within the category (e.g., "Groceries"

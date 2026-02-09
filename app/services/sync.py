@@ -25,6 +25,7 @@ from app.providers import (
 )
 from app.providers.base import FinanceProvider
 from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
+from app.services.categorize import apply_memory_rules
 
 log = logging.getLogger(__name__)
 
@@ -206,6 +207,24 @@ async def _run_sync(db: AsyncSession, provider: FinanceProvider) -> SyncLog:
         # Update cursor
         credential.sync_cursor = str(int(time.time()))
         await db.flush()
+
+        # Auto-apply category memory to new uncategorized transactions
+        if accounts_synced:
+            uncat_result = await db.scalars(
+                select(Transaction).where(
+                    Transaction.account_id.in_(list(accounts_synced)),
+                    Transaction.category == "Uncategorized",
+                )
+            )
+            uncat_txns = list(uncat_result.all())
+            if uncat_txns:
+                matched, _ = await apply_memory_rules(db, uncat_txns)
+                if matched:
+                    log.info(
+                        "Auto-categorized %d transactions from memory for %s",
+                        len(matched),
+                        provider.provider_name,
+                    )
 
         sync_log.accounts_synced = len(accounts_synced)
         sync_log.transactions_added = transactions_added

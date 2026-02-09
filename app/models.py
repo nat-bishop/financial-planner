@@ -1,3 +1,4 @@
+import re
 import time
 
 from sqlalchemy import (
@@ -126,6 +127,39 @@ class Category(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
+
+
+class CategoryMemory(Base):
+    """Remembered category assignments for transaction description patterns.
+
+    Entries come from user corrections (upsert) or LLM results (insert-if-absent).
+    Used for deterministic matching before calling the LLM.
+    """
+
+    __tablename__ = "category_memory"
+    __table_args__ = (
+        UniqueConstraint("normalized_pattern", "account_id", name="uq_pattern_account"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    normalized_pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    account_id: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
+    updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+def normalize_description(description: str) -> str:
+    """Normalize transaction description for pattern matching.
+
+    Strips trailing dates, reference numbers, and collapses whitespace.
+    """
+    s = description.lower().strip()
+    s = re.sub(r'\s+\d{2}/\d{2}(/\d{2,4})?\s*$', '', s)  # trailing dates
+    s = re.sub(r'\s+#?\d{6,}\s*$', '', s)  # trailing ref numbers
+    s = re.sub(r'\s+', ' ', s)  # collapse spaces
+    return s.strip()
 
 
 def exclude_disabled_accounts(query):
