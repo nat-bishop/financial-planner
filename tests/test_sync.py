@@ -18,7 +18,7 @@ from app.core.encryption import decrypt, encrypt
 from app.models import Account, Credential, SyncLog, Transaction
 from app.providers import RateLimitError
 from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
-from app.services.sync import sync_all, sync_provider
+from app.services.sync import _check_rate_limit, _run_sync, start_sync_all
 
 # Load fixture data
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -145,16 +145,32 @@ class TestSimpleFINParsing:
         assert "Rate limit" in response.errors[0]
 
 
-def _make_mock_provider(sync_result: SyncResult):
+def _make_mock_provider(sync_result: SyncResult, provider_name: str = "simplefin"):
     """Create a mock SimpleFIN provider that returns the given SyncResult."""
     from app.providers.base import FinanceProvider
 
     mock_provider = AsyncMock(spec=FinanceProvider)
-    mock_provider.provider_name = "simplefin"
-    mock_provider.display_name = "SimpleFIN Bridge"
+    mock_provider.provider_name = provider_name
+    mock_provider.display_name = "SimpleFIN Bridge" if provider_name == "simplefin" else provider_name
     mock_provider.max_syncs_per_day = 24
     mock_provider.sync = AsyncMock(return_value=sync_result)
     return mock_provider
+
+
+async def _do_sync(db, mock_provider, provider_name: str = "simplefin"):
+    """Helper: create a SyncLog and run _run_sync directly (no background task)."""
+    now = int(time.time())
+    sync_log = SyncLog(
+        provider=provider_name,
+        started_at=now,
+        status="running",
+    )
+    db.add(sync_log)
+    await db.flush()
+
+    with patch("app.services.sync.get_provider", return_value=mock_provider):
+        return await _run_sync(db, mock_provider, sync_log)
+
 
 
 def _fixture_to_sync_result(fixture: dict) -> SyncResult:
@@ -231,8 +247,7 @@ class TestSyncProvider:
         mock_result = _fixture_to_sync_result(fixture)
         mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_log = await sync_provider(db, "simplefin")
+        sync_log = await _do_sync(db, mock_provider)
 
         assert sync_log.status == "success"
         assert sync_log.provider == "simplefin"
@@ -276,8 +291,7 @@ class TestSyncProvider:
         mock_result = _fixture_to_sync_result(fixture)
         mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            await sync_provider(db, "simplefin")
+        await _do_sync(db, mock_provider)
 
         # TXN_001 has transacted_at and extra
         tx1 = await db.scalar(
@@ -313,8 +327,7 @@ class TestSyncProvider:
         mock_provider = _make_mock_provider(mock_result)
         before = int(time.time())
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            await sync_provider(db, "simplefin")
+        await _do_sync(db, mock_provider)
 
         cred = await db.get(Credential, "cred_1")
         cursor_ts = int(cred.sync_cursor)
@@ -337,8 +350,7 @@ class TestSyncProvider:
         mock_result = _fixture_to_sync_result(fixture)
         mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_log = await sync_provider(db, "simplefin")
+        sync_log = await _do_sync(db, mock_provider)
 
         assert sync_log.status == "success"
         assert "Rate limit" in sync_log.error_message
@@ -361,8 +373,7 @@ class TestSyncProvider:
         mock_result1 = _fixture_to_sync_result(fixture1)
         mock_provider1 = _make_mock_provider(mock_result1)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider1):
-            await sync_provider(db, "simplefin")
+        await _do_sync(db, mock_provider1)
 
         # User updates category on TXN_003
         tx = await db.scalar(
@@ -378,8 +389,7 @@ class TestSyncProvider:
         mock_provider2 = _make_mock_provider(mock_result2)
         mock_provider2.max_syncs_per_day = 999
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider2):
-            await sync_provider(db, "simplefin")
+        await _do_sync(db, mock_provider2)
 
         # Refresh
         await db.commit()
@@ -397,8 +407,7 @@ class TestSyncProvider:
         """Sync fails gracefully when no credentials are configured."""
         mock_provider = _make_mock_provider(SyncResult(accounts=[], transactions=[]))
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_log = await sync_provider(db, "simplefin")
+        sync_log = await _do_sync(db, mock_provider)
 
         assert sync_log.status == "failed"
         assert "No credentials" in sync_log.error_message
@@ -421,12 +430,11 @@ class TestSyncProvider:
         mock_provider = _make_mock_provider(mock_result)
         mock_provider.max_syncs_per_day = 999
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_log1 = await sync_provider(db, "simplefin")
-            assert sync_log1.transactions_added == 3
+        sync_log1 = await _do_sync(db, mock_provider)
+        assert sync_log1.transactions_added == 3
 
-            sync_log2 = await sync_provider(db, "simplefin")
-            assert sync_log2.transactions_added == 3  # counts synced
+        sync_log2 = await _do_sync(db, mock_provider)
+        assert sync_log2.transactions_added == 3  # counts synced
 
         # Still only 3 transactions
         transactions = (await db.scalars(select(Transaction))).all()
@@ -445,23 +453,10 @@ class TestSyncProvider:
             ))
         await db.flush()
 
-        cred = Credential(
-            id="cred_1",
-            provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
-        )
-        db.add(cred)
-        await db.flush()
-
         mock_provider = _make_mock_provider(SyncResult(accounts=[], transactions=[]))
 
-        with (
-            patch("app.services.sync.get_provider", return_value=mock_provider),
-            pytest.raises(RateLimitError, match="Daily limit reached"),
-        ):
-            await sync_provider(db, "simplefin")
+        with pytest.raises(RateLimitError, match="Daily limit reached"):
+            await _check_rate_limit(db, mock_provider)
 
     @pytest.mark.asyncio
     async def test_sync_provider_field_on_sync_log(self, db):
@@ -480,8 +475,7 @@ class TestSyncProvider:
         mock_result = _fixture_to_sync_result(fixture)
         mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_log = await sync_provider(db, "simplefin")
+        sync_log = await _do_sync(db, mock_provider)
 
         assert sync_log.provider == "simplefin"
 
@@ -510,8 +504,7 @@ class TestSyncProvider:
         mock_provider.display_name = "Nelnet Student Loans"
         mock_provider.max_syncs_per_day = 4
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            await sync_provider(db, "nelnet")
+        await _do_sync(db, mock_provider, "nelnet")
 
         cred = await db.get(Credential, "cred_1")
         assert cred.session_data is not None
@@ -520,11 +513,11 @@ class TestSyncProvider:
 
 
 class TestSyncAll:
-    """Test sync_all concurrent sync."""
+    """Test start_sync_all background sync."""
 
     @pytest.mark.asyncio
-    async def test_sync_all_syncs_connected_providers(self, db):
-        """sync_all syncs all providers with credentials."""
+    async def test_sync_all_creates_sync_logs(self, db):
+        """start_sync_all creates SyncLog entries for connected providers."""
         cred = Credential(
             id="cred_1",
             provider="simplefin",
@@ -540,15 +533,16 @@ class TestSyncAll:
         mock_provider = _make_mock_provider(mock_result)
 
         with patch("app.services.sync.get_provider", return_value=mock_provider):
-            sync_logs = await sync_all(db)
+            sync_logs = await start_sync_all(db)
 
+        # start_sync_all returns immediately with running logs
         assert len(sync_logs) == 1
-        assert sync_logs[0].status == "success"
+        assert sync_logs[0].status == "running"
 
     @pytest.mark.asyncio
     async def test_sync_all_returns_empty_when_no_providers(self, db):
-        """sync_all returns empty list when no providers connected."""
-        sync_logs = await sync_all(db)
+        """start_sync_all returns empty list when no providers connected."""
+        sync_logs = await start_sync_all(db)
         assert sync_logs == []
 
 

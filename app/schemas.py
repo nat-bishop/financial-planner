@@ -96,6 +96,8 @@ class SyncResponse(BaseModel):
     transactions_added: int
     transactions_updated: int
     error_message: str | None
+    two_fa_status: str | None = None
+    two_fa_method: str | None = None
 
 
 class SyncTriggerResponse(BaseModel):
@@ -117,10 +119,13 @@ class ProviderSyncStatus(BaseModel):
 
     provider: str
     display_name: str
-    status: str  # running, success, failed, idle
+    status: str  # running, success, failed, idle, awaiting_2fa
     started_at: int | None = None
     completed_at: int | None = None
     error_message: str | None = None
+    two_fa_sync_id: int | None = None
+    two_fa_method: str | None = None
+    two_fa_prompt: str | None = None
 
 
 # Providers
@@ -224,5 +229,25 @@ class CategorizeResponse(BaseModel):
 class LLMStatusResponse(BaseModel):
     configured: bool
     model: str
+
+
+# 2FA
+class TwoFACodeSubmission(BaseModel):
+    code: str = Field(min_length=1, max_length=20)
+
+
+class TwoFASubmitResponse(BaseModel):
+    status: str
+    attempts: int
+
+
+class TwoFAStatusResponse(BaseModel):
+    sync_log_id: int
+    status: str
+    method: str
+    prompt: str
+    methods_available: list[str]
+    attempts: int
+    max_attempts: int
 
 

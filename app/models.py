@@ -107,7 +107,9 @@ class SyncLog(Base):
     completed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(
         String, default="running"
-    )  # running, success, failed
+    )  # running, success, failed, awaiting_2fa
+    two_fa_status: Mapped[str | None] = mapped_column(String, nullable=True)  # awaiting_code, code_submitted, timed_out
+    two_fa_method: Mapped[str | None] = mapped_column(String, nullable=True)  # sms, email, authenticator
     accounts_synced: Mapped[int] = mapped_column(Integer, default=0)
     transactions_added: Mapped[int] = mapped_column(Integer, default=0)
     transactions_updated: Mapped[int] = mapped_column(Integer, default=0)

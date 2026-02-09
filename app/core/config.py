@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Browser provider
-    browser_headless: bool = False
+    browser_headless: bool = True
     browser_viewport_width: int = 1280
     browser_viewport_height: int = 800
     browser_operation_timeout_ms: int = 60000

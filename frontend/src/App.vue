@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppNav from './components/AppNav.vue'
+import TwoFAModal from './components/TwoFAModal.vue'
 </script>
 
 <template>
@@ -9,4 +10,5 @@ import AppNav from './components/AppNav.vue'
       <router-view />
     </main>
   </div>
+  <TwoFAModal />
 </template>

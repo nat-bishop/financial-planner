@@ -14,9 +14,10 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from app.providers.base import AuthenticationError, ProviderError
+from app.providers.base import AuthenticationError, ProviderError, TwoFAHandler
 from app.providers.browser import BrowserProvider
 from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
+from app.services.two_fa import TWO_FA_MAX_ATTEMPTS, TwoFAChallenge
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -69,9 +70,10 @@ class NelnetProvider(BrowserProvider):
         credential_data: dict,
         cursor: str | None,
         session_data: dict | None = None,
+        two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         try:
-            return await self._do_sync(credential_data, cursor, session_data)
+            return await self._do_sync(credential_data, cursor, session_data, two_fa_handler)
         except (AuthenticationError, ProviderError):
             raise
         except Exception as e:
@@ -91,6 +93,7 @@ class NelnetProvider(BrowserProvider):
         credential_data: dict,
         cursor: str | None,
         session_data: dict | None = None,
+        two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         async with self._browser_session(session_data) as (page, context):
             # Navigate to login page
@@ -100,7 +103,7 @@ class NelnetProvider(BrowserProvider):
             # Check if we need to log in (on login page or auth domain)
             if self._needs_login(page):
                 log.info("Session expired, logging in")
-                await self._login(page, credential_data)
+                await self._login(page, credential_data, two_fa_handler)
 
             # Scrape data
             raw_accounts = await self._scrape_accounts(page)
@@ -131,7 +134,9 @@ class NelnetProvider(BrowserProvider):
             if (el) el.remove();
         }""")
 
-    async def _login(self, page: Page, creds: dict) -> None:
+    async def _login(
+        self, page: Page, creds: dict, two_fa_handler: TwoFAHandler | None = None
+    ) -> None:
         """Handle Nelnet's login flow (same-tab redirect, not popup).
 
         Flow (verified against real site):
@@ -140,7 +145,7 @@ class NelnetProvider(BrowserProvider):
         3. Redirects to auth.nelnet.studentaid.gov/Account/Login
         4. Fill username (#username-textfield) and password (#password-textfield)
         5. Click "Continue" to submit
-        6. Handle 2FA if prompted, then redirect back to main site
+        6. Handle 2FA if prompted — relay via two_fa_handler or wait for headed browser
         """
         try:
             # Step 1: Dismiss consent overlay and click Continue
@@ -182,13 +187,8 @@ class NelnetProvider(BrowserProvider):
             # Step 6: Check for 2FA or security challenge
             current_url = page.url.lower()
             if "challenge" in current_url or "verify" in current_url or "mfa" in current_url:
-                log.info("2FA/MFA challenge detected, waiting for user")
-                await self._wait_for_user(
-                    page,
-                    "Complete 2FA verification in the browser window",
-                    f'a[href*="{NELNET_BASE_URL}"], [data-testid="dashboard"]',
-                    timeout=120_000,
-                )
+                log.info("2FA/MFA challenge detected at %s", page.url)
+                await self._handle_2fa(page, two_fa_handler)
 
             # Check for login errors
             error_el = await page.query_selector(
@@ -221,6 +221,8 @@ class NelnetProvider(BrowserProvider):
 
         except AuthenticationError:
             raise
+        except ProviderError:
+            raise
         except Exception as e:
             if "timeout" in str(e).lower():
                 raise ProviderError(
@@ -232,6 +234,192 @@ class NelnetProvider(BrowserProvider):
                 f"Login failed: {e}",
                 self.provider_name,
             ) from e
+
+    async def _handle_2fa(
+        self, page: Page, two_fa_handler: TwoFAHandler | None
+    ) -> None:
+        """Handle 2FA challenge — relay code via handler or fall back to headed browser wait."""
+        if two_fa_handler is None:
+            # No handler — fall back to headed browser wait (legacy path)
+            log.info("No 2FA handler — waiting for user in headed browser")
+            await self._wait_for_user(
+                page,
+                "Complete 2FA verification in the browser window",
+                f'a[href*="{NELNET_BASE_URL}"], [data-testid="dashboard"]',
+                timeout=120_000,
+            )
+            return
+
+        # Detect challenge details from page
+        challenge = await self._detect_2fa_challenge(page)
+
+        # Try to trigger code delivery (click "Send code" button if present)
+        await self._trigger_2fa_delivery(page)
+
+        # Retry loop
+        for attempt in range(TWO_FA_MAX_ATTEMPTS):
+            if attempt > 0:
+                challenge = TwoFAChallenge(
+                    method=challenge.method,
+                    prompt=f"Code was incorrect. {challenge.prompt} (attempt {attempt + 1}/{TWO_FA_MAX_ATTEMPTS})",
+                    methods_available=challenge.methods_available,
+                )
+
+            # Suspend here — wait for user to submit code via frontend
+            code = await two_fa_handler(challenge)
+
+            # Enter code into page
+            await self._enter_2fa_code(page, code)
+            await self._random_delay(2000, 4000)
+
+            # Check if we passed
+            if await self._2fa_succeeded(page):
+                log.info("2FA verification successful")
+                return
+
+            # Check if code was rejected
+            if await self._2fa_code_rejected(page):
+                log.warning("2FA code rejected (attempt %d/%d)", attempt + 1, TWO_FA_MAX_ATTEMPTS)
+                continue
+
+            # If neither clear success nor rejection, assume success
+            if not self._is_2fa_page(page):
+                log.info("2FA appears complete (left challenge page)")
+                return
+
+        raise ProviderError(
+            f"2FA failed after {TWO_FA_MAX_ATTEMPTS} attempts",
+            self.provider_name,
+        )
+
+    async def _detect_2fa_challenge(self, page: Page) -> TwoFAChallenge:
+        """Read 2FA challenge details from the page."""
+        # Try to find prompt text (e.g. "Enter the code sent to...")
+        prompt_text = "Enter the verification code"
+        methods: list[str] = []
+        method = "unknown"
+
+        # Scan page for prompt/header text
+        for selector in ["h1", "h2", "h3", ".challenge-prompt", ".mfa-prompt", "label", "p"]:
+            elements = await page.query_selector_all(selector)
+            for el in elements:
+                text = (await el.inner_text()).strip().lower()
+                if any(kw in text for kw in ["code", "verify", "sent to", "enter the"]):
+                    prompt_text = (await el.inner_text()).strip()
+                    break
+            else:
+                continue
+            break
+
+        # Detect method from page content
+        page_text = await page.inner_text("body")
+        page_lower = page_text.lower()
+        if "text message" in page_lower or "sms" in page_lower or "phone" in page_lower:
+            method = "sms"
+            methods.append("sms")
+        if "email" in page_lower:
+            if method == "unknown":
+                method = "email"
+            methods.append("email")
+        if "authenticator" in page_lower or "totp" in page_lower:
+            if method == "unknown":
+                method = "authenticator"
+            methods.append("authenticator")
+
+        return TwoFAChallenge(
+            method=method,
+            prompt=prompt_text,
+            methods_available=methods or [method],
+        )
+
+    async def _trigger_2fa_delivery(self, page: Page) -> None:
+        """Click the "Send code" / "Text me" button if present."""
+        for selector in [
+            'button:has-text("Send")',
+            'button:has-text("Text me")',
+            'button:has-text("Send code")',
+            'button:has-text("Resend")',
+            'a:has-text("Send code")',
+        ]:
+            btn = await page.query_selector(selector)
+            if btn and await btn.is_visible():
+                await btn.click()
+                log.info("Triggered 2FA code delivery via '%s'", selector)
+                await self._random_delay(1000, 2000)
+                return
+
+    async def _enter_2fa_code(self, page: Page, code: str) -> None:
+        """Fill the 2FA code input and submit."""
+        # Find code input with broad selectors
+        code_input = None
+        for selector in [
+            'input[type="tel"]',
+            'input[name*="code" i]',
+            'input[name*="otp" i]',
+            'input[inputmode="numeric"]',
+            'input[autocomplete="one-time-code"]',
+            'input[id*="code" i]',
+            'input[id*="otp" i]',
+            'input[placeholder*="code" i]',
+            # Fallback: text input near a "verify" label
+            'input[type="text"]',
+        ]:
+            el = await page.query_selector(selector)
+            if el and await el.is_visible():
+                code_input = el
+                break
+
+        if not code_input:
+            raise ProviderError(
+                "Could not find 2FA code input field",
+                self.provider_name,
+            )
+
+        await code_input.fill("")
+        await self._random_delay(100, 300)
+        await code_input.fill(code)
+        await self._random_delay(300, 600)
+
+        # Click verify/continue/submit button
+        for selector in [
+            'button:has-text("Verify")',
+            'button:has-text("Continue")',
+            'button:has-text("Submit")',
+            'button:has-text("Confirm")',
+            'button[type="submit"]',
+        ]:
+            btn = await page.query_selector(selector)
+            if btn and await btn.is_visible():
+                await btn.click()
+                return
+
+        # Fallback: press Enter
+        await page.keyboard.press("Enter")
+
+    def _is_2fa_page(self, page: Page) -> bool:
+        """Check if we're still on a 2FA/challenge page."""
+        url = page.url.lower()
+        return any(kw in url for kw in ["challenge", "verify", "mfa", "2fa", "otp"])
+
+    async def _2fa_succeeded(self, page: Page) -> bool:
+        """Check if 2FA is complete (we left the challenge page)."""
+        await self._random_delay(500, 1000)
+        return not self._is_2fa_page(page)
+
+    async def _2fa_code_rejected(self, page: Page) -> bool:
+        """Check if the page shows a rejection error."""
+        for selector in [
+            ".error-message",
+            ".validation-error",
+            ".alert-danger",
+            '[role="alert"]',
+        ]:
+            el = await page.query_selector(selector)
+            if el and await el.is_visible():
+                text = (await el.inner_text()).strip().lower()
+                if any(kw in text for kw in ["invalid", "incorrect", "wrong", "expired", "try again"]):
+                    return True
+        return False
 
     async def _scrape_accounts(self, page: Page) -> list[NelnetAccountData]:
         """Scrape account data from the dashboard.

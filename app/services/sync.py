@@ -1,7 +1,7 @@
-"""Provider-agnostic sync orchestration.
+"""Provider-agnostic sync orchestration with background tasks.
 
-sync_all() syncs all connected providers concurrently.
-sync_provider() syncs a single provider with per-provider locking and rate limits.
+All syncs run as background asyncio.Tasks so HTTP requests return immediately.
+2FA challenges are relayed via TwoFASession to the frontend.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_maker
 from app.core.encryption import decrypt, encrypt
 from app.models import Account, Credential, SyncLog, Transaction
 from app.providers import (
@@ -23,13 +24,21 @@ from app.providers import (
     RateLimitError,
     get_provider,
 )
-from app.providers.base import FinanceProvider
+from app.providers.base import FinanceProvider, TwoFAHandler
 from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
 from app.services.categorize import apply_memory_rules
+from app.services.two_fa import (
+    TwoFAChallenge,
+    TwoFATimeoutError,
+    create_session,
+    get_session,
+    remove_session,
+)
 
 log = logging.getLogger(__name__)
 
 _sync_locks: dict[str, asyncio.Lock] = {}
+_background_tasks: dict[int, asyncio.Task] = {}
 _ONE_DAY = 86400
 
 
@@ -52,51 +61,15 @@ async def get_credential(db: AsyncSession, provider_name: str = "simplefin") -> 
     )
 
 
-async def sync_all(db: AsyncSession) -> list[SyncLog]:
-    """Sync all connected providers concurrently.
+async def start_sync(provider_name: str, db: AsyncSession) -> SyncLog:
+    """Start a background sync for a single provider.
 
-    Returns list of SyncLogs (one per provider). Exceptions become failed logs.
-    """
-    connected = await get_connected_providers(db)
-    if not connected:
-        return []
-
-    results = await asyncio.gather(
-        *[sync_provider(db, name) for name in connected],
-        return_exceptions=True,
-    )
-
-    sync_logs: list[SyncLog] = []
-    for i, result in enumerate(results):
-        if isinstance(result, SyncLog):
-            sync_logs.append(result)
-        elif isinstance(result, BaseException):
-            # Create a failed SyncLog for the exception
-            now = int(time.time())
-            provider_name = connected[i]
-            error_msg = str(result)
-            if isinstance(result, ProviderError):
-                error_msg = f"[{result.provider}] {result}"
-            failed_log = SyncLog(
-                provider=provider_name,
-                started_at=now,
-                completed_at=now,
-                status="failed",
-                error_message=error_msg,
-            )
-            db.add(failed_log)
-            sync_logs.append(failed_log)
-    await db.flush()
-    return sync_logs
-
-
-async def sync_provider(db: AsyncSession, provider_name: str) -> SyncLog:
-    """Sync a single provider with locking, rate limiting, and timeout.
+    Creates a SyncLog, spawns a background task, and returns immediately.
 
     Raises:
-        ProviderError: On provider failure.
-        RateLimitError: If daily limit reached.
         RuntimeError: If sync already in progress for this provider.
+        RateLimitError: If daily limit reached.
+        KeyError: If provider not found.
     """
     provider = get_provider(provider_name)
     lock = _get_lock(provider_name)
@@ -104,25 +77,167 @@ async def sync_provider(db: AsyncSession, provider_name: str) -> SyncLog:
     if lock.locked():
         raise RuntimeError(f"Sync already in progress for {provider_name}")
 
-    # Rate limit: per-provider
+    # Rate limit check (before spawning background task)
     await _check_rate_limit(db, provider)
 
-    async with lock:
-        # Timeout: 30s for API providers, 300s for browser providers
-        # (browser providers may need 2FA on first login)
-        from app.providers.browser import BrowserProvider
+    # Create SyncLog in the request's DB session
+    now = int(time.time())
+    sync_log = SyncLog(
+        provider=provider_name,
+        started_at=now,
+        status="running",
+    )
+    db.add(sync_log)
+    await db.flush()
+    sync_log_id = sync_log.id
 
-        timeout = 300 if isinstance(provider, BrowserProvider) else 30
+    # Spawn background task
+    task = asyncio.create_task(
+        _background_sync(provider_name, sync_log_id),
+        name=f"sync-{provider_name}-{sync_log_id}",
+    )
+    _background_tasks[sync_log_id] = task
+
+    # Remove from tracking dict when done
+    task.add_done_callback(lambda t: _background_tasks.pop(sync_log_id, None))
+
+    log.info("Background sync started for %s (sync_log=%d)", provider_name, sync_log_id)
+    return sync_log
+
+
+async def start_sync_all(db: AsyncSession) -> list[SyncLog]:
+    """Start background syncs for all connected providers.
+
+    Returns list of SyncLogs (one per provider that was started).
+    Providers that fail pre-checks (locked, rate-limited) get failed logs.
+    """
+    connected = await get_connected_providers(db)
+    if not connected:
+        return []
+
+    sync_logs: list[SyncLog] = []
+    for name in connected:
         try:
-            return await asyncio.wait_for(
-                _run_sync(db, provider), timeout=timeout
+            sync_log = await start_sync(name, db)
+            sync_logs.append(sync_log)
+        except (RuntimeError, RateLimitError) as e:
+            now = int(time.time())
+            failed_log = SyncLog(
+                provider=name,
+                started_at=now,
+                completed_at=now,
+                status="failed",
+                error_message=str(e),
             )
-        except TimeoutError:
-            raise ProviderError(
-                "Sync timed out",
-                provider_name,
-                detail={"timeout_seconds": timeout},
-            ) from None
+            db.add(failed_log)
+            sync_logs.append(failed_log)
+
+    await db.flush()
+    return sync_logs
+
+
+async def _background_sync(provider_name: str, sync_log_id: int) -> None:
+    """Background task that runs a provider sync with its own DB session.
+
+    Handles locking, timeouts, 2FA relay, and error recovery.
+    """
+    provider = get_provider(provider_name)
+    lock = _get_lock(provider_name)
+
+    # Determine timeout: 600s for browser (300s sync + 300s 2FA buffer), 30s for API
+    from app.providers.browser import BrowserProvider
+    timeout = 600 if isinstance(provider, BrowserProvider) else 30
+
+    async with async_session_maker() as db:
+        try:
+            async with lock:
+                sync_log = await db.get(SyncLog, sync_log_id)
+                if not sync_log:
+                    log.error("SyncLog %d not found", sync_log_id)
+                    return
+
+                # Build 2FA handler closure
+                handler = _build_2fa_handler(db, sync_log, provider_name)
+
+                try:
+                    await asyncio.wait_for(
+                        _run_sync(db, provider, sync_log, two_fa_handler=handler),
+                        timeout=timeout,
+                    )
+                    await db.commit()
+                except TimeoutError:
+                    sync_log.status = "failed"
+                    sync_log.error_message = f"Sync timed out after {timeout}s"
+                    sync_log.completed_at = int(time.time())
+                    await db.commit()
+                except TwoFATimeoutError as e:
+                    sync_log.status = "failed"
+                    sync_log.two_fa_status = "timed_out"
+                    sync_log.error_message = str(e)
+                    sync_log.completed_at = int(time.time())
+                    await db.commit()
+                except (ProviderError, AuthenticationError, RateLimitError) as e:
+                    sync_log.status = "failed"
+                    sync_log.error_message = str(e)
+                    sync_log.completed_at = int(time.time())
+                    await db.commit()
+                except Exception as e:
+                    log.error("Background sync failed for %s: %s", provider_name, e)
+                    sync_log.status = "failed"
+                    sync_log.error_message = str(e)
+                    sync_log.completed_at = int(time.time())
+                    await db.commit()
+        except Exception as e:
+            # Session itself might be broken — try a fresh one for the error update
+            log.error("Background sync session error for %s: %s", provider_name, e)
+            try:
+                async with async_session_maker() as err_db:
+                    err_log = await err_db.get(SyncLog, sync_log_id)
+                    if err_log and err_log.status in ("running", "awaiting_2fa"):
+                        err_log.status = "failed"
+                        err_log.error_message = f"Internal error: {e}"
+                        err_log.completed_at = int(time.time())
+                        await err_db.commit()
+            except Exception:
+                log.error("Failed to update SyncLog %d after error", sync_log_id)
+        finally:
+            remove_session(sync_log_id)
+
+
+def _build_2fa_handler(
+    db: AsyncSession, sync_log: SyncLog, provider_name: str
+) -> TwoFAHandler:
+    """Build a 2FA handler closure for background sync."""
+
+    async def handler(challenge: TwoFAChallenge) -> str:
+        session = get_session(sync_log.id)
+        if session:
+            # Retry — reset event for next wait
+            session.reset()
+            session.challenge = challenge
+        else:
+            session = create_session(sync_log.id, provider_name, challenge)
+
+        sync_log.status = "awaiting_2fa"
+        sync_log.two_fa_status = "awaiting_code"
+        sync_log.two_fa_method = challenge.method
+        await db.commit()  # Make visible to polling endpoint
+
+        try:
+            code = await session.wait_for_code()
+            sync_log.status = "running"
+            sync_log.two_fa_status = "code_submitted"
+            await db.commit()
+            return code
+        except TwoFATimeoutError:
+            sync_log.status = "failed"
+            sync_log.two_fa_status = "timed_out"
+            sync_log.error_message = "2FA code not provided in time"
+            sync_log.completed_at = int(time.time())
+            await db.commit()
+            raise
+
+    return handler
 
 
 async def _check_rate_limit(db: AsyncSession, provider: FinanceProvider) -> None:
@@ -145,110 +260,97 @@ async def _check_rate_limit(db: AsyncSession, provider: FinanceProvider) -> None
         )
 
 
-async def _run_sync(db: AsyncSession, provider: FinanceProvider) -> SyncLog:
-    """Execute sync for a single provider."""
-    now = int(time.time())
+async def _run_sync(
+    db: AsyncSession,
+    provider: FinanceProvider,
+    sync_log: SyncLog,
+    two_fa_handler: TwoFAHandler | None = None,
+) -> SyncLog:
+    """Execute sync for a single provider.
 
-    # Create SyncLog entry
-    sync_log = SyncLog(
-        provider=provider.provider_name,
-        started_at=now,
-        status="running",
-    )
-    db.add(sync_log)
-    await db.flush()
-
+    sync_log must already exist in db (created by start_sync).
+    """
     log.info("Sync started for %s", provider.provider_name)
 
-    try:
-        credential = await get_credential(db, provider.provider_name)
-        if not credential:
-            sync_log.status = "failed"
-            sync_log.error_message = f"No credentials configured for {provider.display_name}"
-            sync_log.completed_at = int(time.time())
-            return sync_log
-
-        # Decrypt credential data
-        cred_data = json.loads(decrypt(credential.encrypted_data))
-
-        # Decrypt session data if present
-        session_data = None
-        if credential.session_data:
-            session_data = json.loads(decrypt(credential.session_data))
-
-        # Run provider sync
-        result: SyncResult = await provider.sync(
-            credential_data=cred_data,
-            cursor=credential.sync_cursor,
-            session_data=session_data,
-        )
-
-        # Log provider errors (non-fatal)
-        if result.errors:
-            for err in result.errors:
-                log.warning("%s error: %s", provider.provider_name, err)
-            sync_log.error_message = "; ".join(result.errors)
-
-        # Upsert accounts and transactions
-        accounts_synced = set()
-        transactions_added = 0
-
-        for account in result.accounts:
-            await _upsert_account(db, account, provider.provider_name)
-            accounts_synced.add(account.id)
-
-        for tx in result.transactions:
-            await _upsert_transaction(db, tx)
-            transactions_added += 1
-
-        # Save session data if returned (browser providers)
-        if result.session_data is not None:
-            credential.session_data = encrypt(json.dumps(result.session_data))
-
-        # Update cursor
-        credential.sync_cursor = str(int(time.time()))
-        await db.flush()
-
-        # Auto-apply category memory to new uncategorized transactions
-        if accounts_synced:
-            uncat_result = await db.scalars(
-                select(Transaction).where(
-                    Transaction.account_id.in_(list(accounts_synced)),
-                    Transaction.category == "Uncategorized",
-                )
-            )
-            uncat_txns = list(uncat_result.all())
-            if uncat_txns:
-                matched, _ = await apply_memory_rules(db, uncat_txns)
-                if matched:
-                    log.info(
-                        "Auto-categorized %d transactions from memory for %s",
-                        len(matched),
-                        provider.provider_name,
-                    )
-
-        sync_log.accounts_synced = len(accounts_synced)
-        sync_log.transactions_added = transactions_added
-        sync_log.status = "success"
-        sync_log.completed_at = int(time.time())
-        sync_log.raw_response = result.raw_json
-
-        log.info(
-            "Sync complete for %s: %d accounts, %d transactions",
-            provider.provider_name,
-            len(accounts_synced),
-            transactions_added,
-        )
-
-    except (ProviderError, AuthenticationError, RateLimitError):
-        raise
-    except Exception as e:
-        log.error("Sync failed for %s: %s", provider.provider_name, e)
+    credential = await get_credential(db, provider.provider_name)
+    if not credential:
         sync_log.status = "failed"
-        sync_log.error_message = str(e)
+        sync_log.error_message = f"No credentials configured for {provider.display_name}"
         sync_log.completed_at = int(time.time())
-        await db.commit()
-        raise
+        return sync_log
+
+    # Decrypt credential data
+    cred_data = json.loads(decrypt(credential.encrypted_data))
+
+    # Decrypt session data if present
+    session_data = None
+    if credential.session_data:
+        session_data = json.loads(decrypt(credential.session_data))
+
+    # Run provider sync
+    result: SyncResult = await provider.sync(
+        credential_data=cred_data,
+        cursor=credential.sync_cursor,
+        session_data=session_data,
+        two_fa_handler=two_fa_handler,
+    )
+
+    # Log provider errors (non-fatal)
+    if result.errors:
+        for err in result.errors:
+            log.warning("%s error: %s", provider.provider_name, err)
+        sync_log.error_message = "; ".join(result.errors)
+
+    # Upsert accounts and transactions
+    accounts_synced = set()
+    transactions_added = 0
+
+    for account in result.accounts:
+        await _upsert_account(db, account, provider.provider_name)
+        accounts_synced.add(account.id)
+
+    for tx in result.transactions:
+        await _upsert_transaction(db, tx)
+        transactions_added += 1
+
+    # Save session data if returned (browser providers)
+    if result.session_data is not None:
+        credential.session_data = encrypt(json.dumps(result.session_data))
+
+    # Update cursor
+    credential.sync_cursor = str(int(time.time()))
+    await db.flush()
+
+    # Auto-apply category memory to new uncategorized transactions
+    if accounts_synced:
+        uncat_result = await db.scalars(
+            select(Transaction).where(
+                Transaction.account_id.in_(list(accounts_synced)),
+                Transaction.category == "Uncategorized",
+            )
+        )
+        uncat_txns = list(uncat_result.all())
+        if uncat_txns:
+            matched, _ = await apply_memory_rules(db, uncat_txns)
+            if matched:
+                log.info(
+                    "Auto-categorized %d transactions from memory for %s",
+                    len(matched),
+                    provider.provider_name,
+                )
+
+    sync_log.accounts_synced = len(accounts_synced)
+    sync_log.transactions_added = transactions_added
+    sync_log.status = "success"
+    sync_log.completed_at = int(time.time())
+    sync_log.raw_response = result.raw_json
+
+    log.info(
+        "Sync complete for %s: %d accounts, %d transactions",
+        provider.provider_name,
+        len(accounts_synced),
+        transactions_added,
+    )
 
     return sync_log
 

@@ -5,7 +5,12 @@ from __future__ import annotations
 import time
 
 from app.clients.simplefin import SimpleFINClient
-from app.providers.base import AuthenticationError, FinanceProvider, ProviderError
+from app.providers.base import (
+    AuthenticationError,
+    FinanceProvider,
+    ProviderError,
+    TwoFAHandler,
+)
 from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
 
 
@@ -38,6 +43,7 @@ class SimpleFINProvider(FinanceProvider):
         credential_data: dict,
         cursor: str | None,
         session_data: dict | None = None,
+        two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         access_url = credential_data["access_url"]
         client = SimpleFINClient(access_url)

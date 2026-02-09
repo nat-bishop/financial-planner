@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useApi } from '../composables/useApi'
 import type {
   HealthResponse,
   ProviderStatus,
   SyncStatusResponse,
   SyncTriggerResponse,
+  TwoFASubmitResponse,
 } from '../types'
 
 export const useSyncStore = defineStore('sync', () => {
@@ -15,6 +16,15 @@ export const useSyncStore = defineStore('sync', () => {
   const claiming = ref(false)
   const providers = ref<ProviderStatus[]>([])
   const syncStatus = ref<SyncStatusResponse | null>(null)
+
+  // 2FA state
+  const twoFaSyncId = ref<number | null>(null)
+  const twoFaMethod = ref<string | null>(null)
+  const twoFaPrompt = ref<string | null>(null)
+  const twoFaError = ref<string | null>(null)
+  const twoFaSubmitting = ref(false)
+
+  const twoFaPending = computed(() => twoFaSyncId.value !== null)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -99,6 +109,21 @@ export const useSyncStore = defineStore('sync', () => {
     const api = useApi()
     try {
       syncStatus.value = await api.get<SyncStatusResponse>('/sync/status')
+
+      // Check for 2FA
+      const twoFaProvider = syncStatus.value.providers.find(
+        p => p.status === 'awaiting_2fa'
+      )
+
+      if (twoFaProvider && twoFaProvider.two_fa_sync_id) {
+        twoFaSyncId.value = twoFaProvider.two_fa_sync_id
+        twoFaMethod.value = twoFaProvider.two_fa_method
+        twoFaPrompt.value = twoFaProvider.two_fa_prompt
+      } else if (twoFaPending.value) {
+        // 2FA was active but no longer awaiting — clear state
+        dismiss2FA()
+      }
+
       if (!syncStatus.value.any_running) {
         stopPolling()
         syncing.value = false
@@ -108,6 +133,35 @@ export const useSyncStore = defineStore('sync', () => {
     } catch {
       // Don't update error for poll failures
     }
+  }
+
+  async function submit2FACode(code: string): Promise<boolean> {
+    if (!twoFaSyncId.value) return false
+
+    const api = useApi()
+    twoFaSubmitting.value = true
+    twoFaError.value = null
+    try {
+      await api.post<TwoFASubmitResponse>(
+        `/sync/${twoFaSyncId.value}/2fa`,
+        { code }
+      )
+      // Keep polling — status will transition to "running" then "success"
+      return true
+    } catch (e: any) {
+      twoFaError.value = e.message || 'Failed to submit code'
+      return false
+    } finally {
+      twoFaSubmitting.value = false
+    }
+  }
+
+  function dismiss2FA(): void {
+    twoFaSyncId.value = null
+    twoFaMethod.value = null
+    twoFaPrompt.value = null
+    twoFaError.value = null
+    twoFaSubmitting.value = false
   }
 
   function startPolling(): void {
@@ -134,9 +188,11 @@ export const useSyncStore = defineStore('sync', () => {
 
   return {
     syncing, health, error, claiming, providers, syncStatus,
+    twoFaPending, twoFaSyncId, twoFaMethod, twoFaPrompt, twoFaError, twoFaSubmitting,
     isConnected, hasAnyConnection,
     fetchProviders, connectProvider, disconnectProvider,
     triggerSync, triggerProviderSync, pollSyncStatus,
+    submit2FACode, dismiss2FA,
     fetchHealth,
   }
 })

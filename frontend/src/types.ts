@@ -74,6 +74,14 @@ export interface ProviderSyncStatus {
   started_at: number | null
   completed_at: number | null
   error_message: string | null
+  two_fa_sync_id: number | null
+  two_fa_method: string | null
+  two_fa_prompt: string | null
+}
+
+export interface TwoFASubmitResponse {
+  status: string
+  attempts: number
 }
 
 export interface SyncStatusResponse {

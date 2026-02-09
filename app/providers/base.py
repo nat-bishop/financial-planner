@@ -7,10 +7,14 @@ three exception types: ProviderError (base), AuthenticationError, RateLimitError
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.providers.models import SyncResult
+    from app.services.two_fa import TwoFAChallenge
+
+TwoFAHandler = Callable[["TwoFAChallenge"], Awaitable[str]]
 
 
 class ProviderError(Exception):
@@ -64,6 +68,7 @@ class FinanceProvider(ABC):
         credential_data: dict,
         cursor: str | None,
         session_data: dict | None = None,
+        two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         """Fetch accounts and transactions from the provider.
 
@@ -73,6 +78,7 @@ class FinanceProvider(ABC):
             credential_data: Decrypted credential dict.
             cursor: Last sync timestamp (or None for first sync).
             session_data: Browser session state (browser providers only).
+            two_fa_handler: Async callback for 2FA code relay (browser providers only).
 
         Returns:
             SyncResult with accounts, transactions, and optional session state.

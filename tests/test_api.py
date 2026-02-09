@@ -1226,6 +1226,7 @@ class TestSyncAutoApplyMemory:
             ProviderTransaction,
             SyncResult,
         )
+        from app.services.sync import _run_sync
 
         # Set up credential and memory entry
         cred = Credential(
@@ -1262,10 +1263,17 @@ class TestSyncAutoApplyMemory:
         mock_provider.max_syncs_per_day = 24
         mock_provider.sync = AsyncMock(return_value=mock_result)
 
-        with patch("app.services.sync.get_provider", return_value=mock_provider):
-            response = await client.post("/sync/")
+        # Run sync directly (background tasks can't share test's in-memory DB)
+        sync_log = SyncLog(
+            provider="simplefin",
+            started_at=int(time.time()),
+            status="running",
+        )
+        db.add(sync_log)
+        await db.flush()
 
-        assert response.status_code == 202
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            await _run_sync(db, mock_provider, sync_log)
 
         # Check the transaction was auto-categorized
         tx_response = await client.get("/transactions/")
@@ -1283,6 +1291,7 @@ class TestSyncAutoApplyMemory:
             ProviderTransaction,
             SyncResult,
         )
+        from app.services.sync import _run_sync
 
         cred = Credential(
             id="cred_1", provider="simplefin",
@@ -1321,8 +1330,17 @@ class TestSyncAutoApplyMemory:
         mock_provider.max_syncs_per_day = 24
         mock_provider.sync = AsyncMock(return_value=mock_result)
 
+        # Run sync directly (background tasks can't share test's in-memory DB)
+        sync_log = SyncLog(
+            provider="simplefin",
+            started_at=int(time.time()),
+            status="running",
+        )
+        db.add(sync_log)
+        await db.flush()
+
         with patch("app.services.sync.get_provider", return_value=mock_provider):
-            await client.post("/sync/")
+            await _run_sync(db, mock_provider, sync_log)
 
         # Transaction should still be "Bills" — memory only applies to "Uncategorized"
         tx_response = await client.get("/transactions/")

@@ -1,4 +1,4 @@
-"""Sync routes — async sync with background tasks and polling."""
+"""Sync routes — background sync tasks with 2FA relay."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models import SyncLog
 from app.providers import (
-    AuthenticationError,
-    ProviderError,
     RateLimitError,
     get_provider,
     list_providers,
@@ -22,8 +20,12 @@ from app.schemas import (
     SyncResponse,
     SyncStatusResponse,
     SyncTriggerResponse,
+    TwoFACodeSubmission,
+    TwoFAStatusResponse,
+    TwoFASubmitResponse,
 )
-from app.services.sync import get_connected_providers, sync_all, sync_provider
+from app.services.sync import get_connected_providers, start_sync, start_sync_all
+from app.services.two_fa import TWO_FA_MAX_ATTEMPTS, get_session
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ async def trigger_sync_all(
     if not connected:
         raise HTTPException(status_code=400, detail="No providers connected")
 
-    sync_logs = await sync_all(db)
+    sync_logs = await start_sync_all(db)
     return SyncTriggerResponse(
         sync_ids=[s.id for s in sync_logs],
         message=f"Sync started for {len(sync_logs)} provider(s)",
@@ -66,19 +68,62 @@ async def trigger_sync_one(
         ) from None
 
     try:
-        sync_log = await sync_provider(db, provider_name)
+        sync_log = await start_sync(provider_name, db)
     except RateLimitError as e:
         raise HTTPException(status_code=429, detail=str(e)) from None
-    except AuthenticationError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from None
-    except ProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from None
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
 
     return SyncTriggerResponse(
         sync_ids=[sync_log.id],
         message=f"Sync started for {provider_name}",
+    )
+
+
+@router.post("/{sync_log_id:int}/2fa", response_model=TwoFASubmitResponse)
+async def submit_2fa_code(
+    sync_log_id: int,
+    body: TwoFACodeSubmission,
+) -> TwoFASubmitResponse:
+    """Submit a 2FA verification code for an active sync."""
+    session = get_session(sync_log_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="No active 2FA session for this sync",
+        )
+
+    if session.max_attempts_exceeded:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum attempts ({TWO_FA_MAX_ATTEMPTS}) exceeded",
+        )
+
+    session.submit_code(body.code)
+    return TwoFASubmitResponse(
+        status="submitted",
+        attempts=session.attempts,
+    )
+
+
+@router.get("/{sync_log_id:int}/2fa", response_model=TwoFAStatusResponse)
+async def get_2fa_status(sync_log_id: int) -> TwoFAStatusResponse:
+    """Get 2FA challenge details for an active sync."""
+    session = get_session(sync_log_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="No active 2FA session for this sync",
+        )
+
+    return TwoFAStatusResponse(
+        sync_log_id=session.sync_log_id,
+        status="awaiting_code" if not session.max_attempts_exceeded else "max_attempts",
+        method=session.challenge.method,
+        prompt=session.challenge.prompt,
+        methods_available=session.challenge.methods_available,
+        attempts=session.attempts,
+        max_attempts=TWO_FA_MAX_ATTEMPTS,
     )
 
 
@@ -106,6 +151,19 @@ async def sync_status(
                 display_name=p.display_name,
                 status="running",
                 started_at=last_sync.started_at,
+            ))
+        elif last_sync and last_sync.status == "awaiting_2fa":
+            any_running = True
+            # Look up in-memory session for challenge details
+            session = get_session(last_sync.id)
+            statuses.append(ProviderSyncStatus(
+                provider=p.provider_name,
+                display_name=p.display_name,
+                status="awaiting_2fa",
+                started_at=last_sync.started_at,
+                two_fa_sync_id=last_sync.id,
+                two_fa_method=last_sync.two_fa_method,
+                two_fa_prompt=session.challenge.prompt if session else None,
             ))
         elif last_sync:
             statuses.append(ProviderSyncStatus(
