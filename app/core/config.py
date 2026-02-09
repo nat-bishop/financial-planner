@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Browser provider
+    browser_headless: bool = False
+
     # Gemini
     gemini_api_key: str = ""
 

@@ -20,11 +20,13 @@ class TestHealthEndpoint:
         assert data["status"] == "ok"
         assert data["account_count"] == 0
         assert data["last_sync_at"] is None
+        assert "providers" in data
 
     @pytest.mark.asyncio
     async def test_health_shows_last_sync(self, client, db):
         """Health endpoint shows last sync info."""
         sync_log = SyncLog(
+            provider="simplefin",
             started_at=int(time.time()),
             completed_at=int(time.time()),
             status="success",
@@ -38,6 +40,17 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["last_sync_status"] == "success"
         assert data["last_sync_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_health_shows_provider_status(self, client, db):
+        """Health endpoint includes per-provider status."""
+        response = await client.get("/health")
+        data = response.json()
+        # Should have at least simplefin provider
+        assert len(data["providers"]) >= 1
+        simplefin = next(p for p in data["providers"] if p["provider"] == "simplefin")
+        assert simplefin["connected"] is False
+        assert simplefin["display_name"] == "SimpleFIN Bridge"
 
 
 class TestAccountsEndpoint:
@@ -427,18 +440,29 @@ class TestTransactionsEndpoint:
         assert len(data["ids"]) == 1
 
 
-class TestSyncEndpoints:
+class TestProviderEndpoints:
     @pytest.mark.asyncio
-    async def test_claim_setup_token_creates_credentials(self, client, db):
-        """POST /sync/credentials claims setup token and stores credentials."""
-        with patch("app.routes.sync.SimpleFINClient") as MockClient:
+    async def test_list_providers(self, client):
+        """GET /providers/ returns all providers with status."""
+        response = await client.get("/providers/")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+        simplefin = next(p for p in data if p["provider"] == "simplefin")
+        assert simplefin["connected"] is False
+        assert simplefin["display_name"] == "SimpleFIN Bridge"
+
+    @pytest.mark.asyncio
+    async def test_store_simplefin_credentials(self, client, db):
+        """POST /providers/simplefin/credentials claims token and stores creds."""
+        with patch("app.providers.simplefin.SimpleFINClient") as MockClient:
             MockClient.claim_setup_token = AsyncMock(
                 return_value="https://user:pass@bridge.simplefin.org/simplefin"
             )
 
             response = await client.post(
-                "/sync/credentials",
-                json={"setup_token": "dGVzdC1jbGFpbS11cmw="},  # base64 of "test-claim-url"
+                "/providers/simplefin/credentials",
+                json={"setup_token": "dGVzdC1jbGFpbS11cmw="},
             )
 
         assert response.status_code == 200
@@ -447,8 +471,8 @@ class TestSyncEndpoints:
         assert "id" in data
 
     @pytest.mark.asyncio
-    async def test_claim_setup_token_rejects_duplicate(self, client, db):
-        """POST /sync/credentials rejects when credentials already exist."""
+    async def test_store_credentials_rejects_duplicate(self, client, db):
+        """POST /providers/{name}/credentials rejects when creds already exist."""
         cred = Credential(
             id="cred_1",
             provider="simplefin",
@@ -458,64 +482,24 @@ class TestSyncEndpoints:
         await db.commit()
 
         response = await client.post(
-            "/sync/credentials",
+            "/providers/simplefin/credentials",
             json={"setup_token": "dGVzdC1jbGFpbS11cmw="},
         )
         assert response.status_code == 400
         assert "already configured" in response.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_trigger_sync(self, client, db):
-        """POST /sync/ triggers sync and returns SyncLog."""
-        with patch("app.routes.sync.sync_accounts") as mock_sync:
-            sync_log = SyncLog(
-                started_at=int(time.time()),
-                completed_at=int(time.time()),
-                status="success",
-                accounts_synced=2,
-                transactions_added=10,
-                transactions_updated=0,
-            )
-            db.add(sync_log)
-            await db.flush()
-            mock_sync.return_value = sync_log
-
-            response = await client.post("/sync/")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "success"
-        assert data["accounts_synced"] == 2
-        assert data["transactions_added"] == 10
+    async def test_store_credentials_unknown_provider(self, client):
+        """POST /providers/{name}/credentials returns 404 for unknown provider."""
+        response = await client.post(
+            "/providers/unknown/credentials",
+            json={"foo": "bar"},
+        )
+        assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_trigger_sync_409_when_already_running(self, client, db):
-        """POST /sync/ returns 409 when sync already in progress."""
-        with patch("app.routes.sync.sync_accounts") as mock_sync:
-            mock_sync.side_effect = RuntimeError("Sync already in progress")
-
-            response = await client.post("/sync/")
-
-        assert response.status_code == 409
-        assert "already in progress" in response.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_trigger_sync_429_when_daily_limit_reached(self, client, db):
-        """POST /sync/ returns 429 when daily sync limit is reached."""
-        with patch("app.routes.sync.sync_accounts") as mock_sync:
-            mock_sync.side_effect = RuntimeError(
-                "Daily limit reached — 24 syncs in the last 24 hours. "
-                "SimpleFIN allows ~24 requests/day."
-            )
-
-            response = await client.post("/sync/")
-
-        assert response.status_code == 429
-        assert "Daily limit reached" in response.json()["detail"]
-
-    @pytest.mark.asyncio
-    async def test_delete_credentials(self, client, db):
-        """DELETE /sync/credentials deletes stored credentials."""
+    async def test_delete_provider_credentials(self, client, db):
+        """DELETE /providers/{name}/credentials deletes stored credentials."""
         cred = Credential(
             id="cred_1",
             provider="simplefin",
@@ -524,15 +508,124 @@ class TestSyncEndpoints:
         db.add(cred)
         await db.commit()
 
-        response = await client.delete("/sync/credentials")
+        response = await client.delete("/providers/simplefin/credentials")
         assert response.status_code == 200
         assert response.json()["status"] == "deleted"
 
     @pytest.mark.asyncio
     async def test_delete_credentials_404_when_none(self, client):
-        """DELETE /sync/credentials returns 404 when no credentials exist."""
-        response = await client.delete("/sync/credentials")
+        """DELETE /providers/{name}/credentials returns 404 when no credentials exist."""
+        response = await client.delete("/providers/simplefin/credentials")
         assert response.status_code == 404
+
+
+class TestSyncEndpoints:
+    @pytest.mark.asyncio
+    async def test_trigger_sync_all(self, client, db):
+        """POST /sync/ syncs all connected providers and returns 202."""
+        from app.providers.models import SyncResult
+
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.commit()
+
+        mock_result = SyncResult(
+            accounts=[], transactions=[], errors=[], raw_json="{}",
+        )
+        mock_provider = AsyncMock()
+        mock_provider.provider_name = "simplefin"
+        mock_provider.display_name = "SimpleFIN Bridge"
+        mock_provider.max_syncs_per_day = 24
+        mock_provider.sync = AsyncMock(return_value=mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            response = await client.post("/sync/")
+
+        assert response.status_code == 202
+        data = response.json()
+        assert "sync_ids" in data
+        assert len(data["sync_ids"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync_no_providers(self, client):
+        """POST /sync/ returns 400 when no providers connected."""
+        response = await client.post("/sync/")
+        assert response.status_code == 400
+        assert "No providers connected" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync_one_provider(self, client, db):
+        """POST /sync/{provider} syncs one provider."""
+        from app.providers.models import SyncResult
+
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.commit()
+
+        mock_result = SyncResult(
+            accounts=[], transactions=[], errors=[], raw_json="{}",
+        )
+        mock_provider = AsyncMock()
+        mock_provider.provider_name = "simplefin"
+        mock_provider.display_name = "SimpleFIN Bridge"
+        mock_provider.max_syncs_per_day = 24
+        mock_provider.sync = AsyncMock(return_value=mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            response = await client.post("/sync/simplefin")
+
+        assert response.status_code == 202
+        data = response.json()
+        assert len(data["sync_ids"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_trigger_sync_unknown_provider(self, client):
+        """POST /sync/{provider} returns 404 for unknown provider."""
+        response = await client.post("/sync/unknown")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_sync_status(self, client, db):
+        """GET /sync/status returns per-provider sync status."""
+        response = await client.get("/sync/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "providers" in data
+        assert "any_running" in data
+        assert data["any_running"] is False
+
+    @pytest.mark.asyncio
+    async def test_sync_logs(self, client, db):
+        """GET /sync/logs returns recent sync history."""
+        now = int(time.time())
+        db.add(SyncLog(
+            provider="simplefin",
+            started_at=now,
+            completed_at=now,
+            status="success",
+            accounts_synced=2,
+            transactions_added=10,
+        ))
+        await db.commit()
+
+        response = await client.get("/sync/logs")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["provider"] == "simplefin"
+        assert data[0]["status"] == "success"
 
 
 class TestAnalyticsEndpoint:

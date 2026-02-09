@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Finance Planner",
-    description="Personal finance app with SimpleFIN sync",
+    description="Personal finance app with multi-provider sync",
     version="0.1.0",
     lifespan=lifespan,
 )

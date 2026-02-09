@@ -4,23 +4,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import Account, Credential, SyncLog
-from app.schemas import HealthResponse, SyncError
+from app.providers import list_providers
+from app.schemas import HealthResponse, ProviderStatusResponse, SyncError
 
 router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
-    """Get system health status including last sync info."""
-    # Get last sync
+    """Get system health status including per-provider sync info."""
+    # Get last sync (across all providers)
     last_sync = await db.scalar(
         select(SyncLog).order_by(SyncLog.started_at.desc()).limit(1)
     )
 
-    # Check if credentials exist
-    has_creds = await db.scalar(
-        select(Credential).where(Credential.provider == "simplefin")
-    )
+    # Check if any credentials exist
+    has_creds = await db.scalar(select(Credential).limit(1))
 
     # Get account count
     account_count = await db.scalar(select(func.count(Account.id)))
@@ -38,9 +37,30 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
         for e in recent_errors_result.all()
     ]
 
+    # Per-provider status
+    provider_statuses: list[ProviderStatusResponse] = []
+    for p in list_providers():
+        cred = await db.scalar(
+            select(Credential).where(Credential.provider == p.provider_name)
+        )
+        p_last_sync = await db.scalar(
+            select(SyncLog)
+            .where(SyncLog.provider == p.provider_name)
+            .order_by(SyncLog.started_at.desc())
+            .limit(1)
+        )
+        provider_statuses.append(ProviderStatusResponse(
+            provider=p.provider_name,
+            display_name=p.display_name,
+            connected=cred is not None,
+            last_sync_at=p_last_sync.started_at if p_last_sync else None,
+            last_sync_status=p_last_sync.status if p_last_sync else None,
+        ))
+
     return HealthResponse(
         status="ok",
         has_credentials=has_creds is not None,
+        providers=provider_statuses,
         last_sync_at=last_sync.started_at if last_sync else None,
         last_sync_status=last_sync.status if last_sync else None,
         account_count=account_count or 0,

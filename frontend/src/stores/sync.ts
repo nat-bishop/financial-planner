@@ -1,39 +1,47 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useApi } from '../composables/useApi'
-import type { SyncLog, HealthResponse } from '../types'
+import type {
+  HealthResponse,
+  ProviderStatus,
+  SyncStatusResponse,
+  SyncTriggerResponse,
+} from '../types'
 
 export const useSyncStore = defineStore('sync', () => {
   const syncing = ref(false)
-  const lastSync = ref<SyncLog | null>(null)
   const health = ref<HealthResponse | null>(null)
   const error = ref<string | null>(null)
   const claiming = ref(false)
-  const connected = ref(false)
+  const providers = ref<ProviderStatus[]>([])
+  const syncStatus = ref<SyncStatusResponse | null>(null)
 
-  async function triggerSync(): Promise<SyncLog | null> {
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+
+  function isConnected(providerName: string): boolean {
+    return providers.value.some(p => p.provider === providerName && p.connected)
+  }
+
+  function hasAnyConnection(): boolean {
+    return providers.value.some(p => p.connected)
+  }
+
+  async function fetchProviders(): Promise<void> {
     const api = useApi()
-    syncing.value = true
-    error.value = null
     try {
-      const result = await api.post<SyncLog>('/sync/')
-      lastSync.value = result
-      return result
+      providers.value = await api.get<ProviderStatus[]>('/providers/')
     } catch (e: any) {
       error.value = e.message
-      return null
-    } finally {
-      syncing.value = false
     }
   }
 
-  async function claimSetupToken(setupToken: string): Promise<boolean> {
+  async function connectProvider(name: string, data: Record<string, string>): Promise<boolean> {
     const api = useApi()
     claiming.value = true
     error.value = null
     try {
-      await api.post('/sync/credentials', { setup_token: setupToken })
-      connected.value = true
+      await api.post(`/providers/${name}/credentials`, data)
+      await fetchProviders()
       await triggerSync()
       return true
     } catch (e: any) {
@@ -44,12 +52,12 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
-  async function deleteCredentials(): Promise<boolean> {
+  async function disconnectProvider(name: string): Promise<boolean> {
     const api = useApi()
     error.value = null
     try {
-      await api.del('/sync/credentials')
-      connected.value = false
+      await api.del(`/providers/${name}/credentials`)
+      await fetchProviders()
       return true
     } catch (e: any) {
       error.value = e.message
@@ -57,23 +65,78 @@ export const useSyncStore = defineStore('sync', () => {
     }
   }
 
+  async function triggerSync(): Promise<SyncTriggerResponse | null> {
+    const api = useApi()
+    syncing.value = true
+    error.value = null
+    try {
+      const result = await api.post<SyncTriggerResponse>('/sync/')
+      startPolling()
+      return result
+    } catch (e: any) {
+      error.value = e.message
+      syncing.value = false
+      return null
+    }
+  }
+
+  async function triggerProviderSync(name: string): Promise<SyncTriggerResponse | null> {
+    const api = useApi()
+    syncing.value = true
+    error.value = null
+    try {
+      const result = await api.post<SyncTriggerResponse>(`/sync/${name}`)
+      startPolling()
+      return result
+    } catch (e: any) {
+      error.value = e.message
+      syncing.value = false
+      return null
+    }
+  }
+
+  async function pollSyncStatus(): Promise<void> {
+    const api = useApi()
+    try {
+      syncStatus.value = await api.get<SyncStatusResponse>('/sync/status')
+      if (!syncStatus.value.any_running) {
+        stopPolling()
+        syncing.value = false
+        await fetchHealth()
+        await fetchProviders()
+      }
+    } catch {
+      // Don't update error for poll failures
+    }
+  }
+
+  function startPolling(): void {
+    stopPolling()
+    pollTimer = setInterval(pollSyncStatus, 2000)
+  }
+
+  function stopPolling(): void {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
   async function fetchHealth() {
     const api = useApi()
     try {
       health.value = await api.get<HealthResponse>('/health')
-      connected.value = health.value.has_credentials
-      console.log('fetchHealth:', {
-        lastSyncAt: health.value.last_sync_at,
-        connected: connected.value,
-        accountCount: health.value.account_count
-      })
+      providers.value = health.value.providers
     } catch (e: any) {
       error.value = e.message
     }
   }
 
   return {
-    syncing, lastSync, health, error, claiming, connected,
-    triggerSync, claimSetupToken, deleteCredentials, fetchHealth,
+    syncing, health, error, claiming, providers, syncStatus,
+    isConnected, hasAnyConnection,
+    fetchProviders, connectProvider, disconnectProvider,
+    triggerSync, triggerProviderSync, pollSyncStatus,
+    fetchHealth,
   }
 })

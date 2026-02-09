@@ -24,8 +24,9 @@ class Credential(Base):
     __tablename__ = "credentials"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, unique=True)  # 'simplefin'
+    provider: Mapped[str] = mapped_column(String, unique=True)  # 'simplefin', 'nelnet'
     encrypted_data: Mapped[str] = mapped_column(Text)  # Fernet-encrypted JSON
+    session_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # Encrypted browser session
     sync_cursor: Mapped[str | None] = mapped_column(String, nullable=True)  # Unix timestamp of last sync
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -100,6 +101,7 @@ class SyncLog(Base):
     __tablename__ = "sync_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="simplefin")
     started_at: Mapped[int] = mapped_column(Integer)
     completed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(

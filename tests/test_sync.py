@@ -1,4 +1,4 @@
-"""Tests for SimpleFIN sync functionality."""
+"""Tests for sync functionality with provider abstraction."""
 
 import json
 import time
@@ -16,7 +16,9 @@ from app.clients.simplefin import (
 )
 from app.core.encryption import decrypt, encrypt
 from app.models import Account, Credential, SyncLog, Transaction
-from app.services.sync import sync_accounts
+from app.providers import RateLimitError
+from app.providers.models import ProviderAccount, ProviderTransaction, SyncResult
+from app.services.sync import sync_all, sync_provider
 
 # Load fixture data
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -143,12 +145,78 @@ class TestSimpleFINParsing:
         assert "Rate limit" in response.errors[0]
 
 
-class TestSyncAccounts:
-    """Test sync orchestration."""
+def _make_mock_provider(sync_result: SyncResult):
+    """Create a mock SimpleFIN provider that returns the given SyncResult."""
+    from app.providers.base import FinanceProvider
+
+    mock_provider = AsyncMock(spec=FinanceProvider)
+    mock_provider.provider_name = "simplefin"
+    mock_provider.display_name = "SimpleFIN Bridge"
+    mock_provider.max_syncs_per_day = 24
+    mock_provider.sync = AsyncMock(return_value=sync_result)
+    return mock_provider
+
+
+def _fixture_to_sync_result(fixture: dict) -> SyncResult:
+    """Convert fixture JSON to SyncResult with ProviderAccount/ProviderTransaction."""
+    now = int(time.time())
+    accounts: list[ProviderAccount] = []
+    transactions: list[ProviderTransaction] = []
+
+    for acc_data in fixture.get("accounts", []):
+        org = acc_data.get("org", {})
+        org_name = org.get("name") or org.get("domain")
+
+        account = ProviderAccount(
+            id=acc_data["id"],
+            name=acc_data.get("name", ""),
+            currency=acc_data.get("currency", "USD"),
+            balance_current=_sfin_amount_to_cents(str(acc_data.get("balance", "0"))),
+            balance_available=(
+                _sfin_amount_to_cents(str(acc_data["available-balance"]))
+                if acc_data.get("available-balance") is not None
+                else None
+            ),
+            balance_date=acc_data.get("balance-date"),
+            org_name=org_name,
+        )
+        accounts.append(account)
+
+        for tx_data in acc_data.get("transactions", []):
+            posted = tx_data.get("posted", 0)
+            pending = posted == 0
+            if pending:
+                posted = now
+
+            transaction = ProviderTransaction(
+                id=tx_data["id"],
+                account_id=acc_data["id"],
+                amount=_sfin_amount_to_cents(str(tx_data.get("amount", "0"))),
+                date=posted,
+                description=tx_data.get("description", ""),
+                pending=pending,
+                transacted_at=tx_data.get("transacted_at"),
+                extra=tx_data.get("extra"),
+            )
+            transactions.append(transaction)
+
+    return SyncResult(
+        accounts=accounts,
+        transactions=transactions,
+        errors=fixture.get("errors", []),
+        raw_json=json.dumps({
+            "accounts_count": len(accounts),
+            "errors": fixture.get("errors", []),
+        }),
+    )
+
+
+class TestSyncProvider:
+    """Test sync orchestration with provider abstraction."""
 
     @pytest.mark.asyncio
     async def test_sync_creates_accounts_and_transactions(self, db):
-        """Sync creates accounts and transactions from SimpleFIN data."""
+        """Sync creates accounts and transactions via provider."""
         cred = Credential(
             id="cred_1",
             provider="simplefin",
@@ -160,15 +228,14 @@ class TestSyncAccounts:
         await db.flush()
 
         fixture = load_simplefin_initial_fixture()
-        mock_response = _fixture_to_sfin_response(fixture)
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.SimpleFINClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
-
-            sync_log = await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_log = await sync_provider(db, "simplefin")
 
         assert sync_log.status == "success"
+        assert sync_log.provider == "simplefin"
         assert sync_log.accounts_synced == 2
         assert sync_log.transactions_added == 3
         assert sync_log.raw_response is not None
@@ -177,7 +244,6 @@ class TestSyncAccounts:
         accounts = (await db.scalars(select(Account))).all()
         assert len(accounts) == 2
 
-        # Verify provider is simplefin
         checking = next(a for a in accounts if a.id == "ACT_001")
         assert checking.provider == "simplefin"
         assert checking.org_name == "First Bank"
@@ -186,12 +252,12 @@ class TestSyncAccounts:
         transactions = (await db.scalars(select(Transaction))).all()
         assert len(transactions) == 3
 
-        # Verify amount convention (no sign inversion)
+        # Verify amount convention
         amazon_tx = next(t for t in transactions if t.external_id == "TXN_001")
-        assert amazon_tx.amount == -5000  # expense is negative
+        assert amazon_tx.amount == -5000
 
         payroll_tx = next(t for t in transactions if t.external_id == "TXN_002")
-        assert payroll_tx.amount == 150000  # income is positive
+        assert payroll_tx.amount == 150000
 
     @pytest.mark.asyncio
     async def test_sync_stores_transacted_at_and_extra(self, db):
@@ -207,12 +273,11 @@ class TestSyncAccounts:
         await db.flush()
 
         fixture = load_simplefin_initial_fixture()
-        mock_response = _fixture_to_sfin_response(fixture)
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.SimpleFINClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
-            await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            await sync_provider(db, "simplefin")
 
         # TXN_001 has transacted_at and extra
         tx1 = await db.scalar(
@@ -244,22 +309,20 @@ class TestSyncAccounts:
         await db.flush()
 
         fixture = load_simplefin_initial_fixture()
-        mock_response = _fixture_to_sfin_response(fixture)
-
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
         before = int(time.time())
 
-        with patch("app.services.sync.SimpleFINClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
-            await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            await sync_provider(db, "simplefin")
 
         cred = await db.get(Credential, "cred_1")
         cursor_ts = int(cred.sync_cursor)
         assert cursor_ts >= before
 
     @pytest.mark.asyncio
-    async def test_sync_logs_simplefin_errors(self, db):
-        """SimpleFIN errors array is captured in sync log."""
+    async def test_sync_logs_provider_errors(self, db):
+        """Provider errors array is captured in sync log."""
         cred = Credential(
             id="cred_1",
             provider="simplefin",
@@ -271,12 +334,11 @@ class TestSyncAccounts:
         await db.flush()
 
         fixture = load_simplefin_incremental_fixture()
-        mock_response = _fixture_to_sfin_response(fixture)
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
 
-        with patch("app.services.sync.SimpleFINClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
-            sync_log = await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_log = await sync_provider(db, "simplefin")
 
         assert sync_log.status == "success"
         assert "Rate limit" in sync_log.error_message
@@ -296,12 +358,11 @@ class TestSyncAccounts:
 
         # First sync
         fixture1 = load_simplefin_initial_fixture()
-        mock_response1 = _fixture_to_sfin_response(fixture1)
+        mock_result1 = _fixture_to_sync_result(fixture1)
+        mock_provider1 = _make_mock_provider(mock_result1)
 
-        with patch("app.services.sync.SimpleFINClient") as MockClient:
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response1)
-            await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider1):
+            await sync_provider(db, "simplefin")
 
         # User updates category on TXN_003
         tx = await db.scalar(
@@ -311,38 +372,36 @@ class TestSyncAccounts:
         tx.notes = "Birthday dinner"
         await db.flush()
 
-        # Second sync — TXN_003 now has real posted date (not pending)
+        # Second sync — same data
         fixture2 = load_simplefin_incremental_fixture()
-        mock_response2 = _fixture_to_sfin_response(fixture2)
+        mock_result2 = _fixture_to_sync_result(fixture2)
+        mock_provider2 = _make_mock_provider(mock_result2)
+        mock_provider2.max_syncs_per_day = 999
 
-        # Need to remove rate limit check for this test
-        with (
-            patch("app.services.sync.SimpleFINClient") as MockClient,
-            patch("app.services.sync.MAX_SYNCS_PER_DAY", 999),
-        ):
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response2)
-            await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider2):
+            await sync_provider(db, "simplefin")
 
         # Refresh
         await db.commit()
         db.expire_all()
 
-        # Verify user fields preserved
         tx = await db.scalar(
             select(Transaction).where(Transaction.external_id == "TXN_003")
         )
         assert tx.category == "Dining Out"  # Preserved
         assert tx.notes == "Birthday dinner"  # Preserved
-        assert tx.is_pending is False  # Updated from SimpleFIN
+        assert tx.is_pending is False  # Updated from provider
 
     @pytest.mark.asyncio
     async def test_sync_fails_without_credentials(self, db):
         """Sync fails gracefully when no credentials are configured."""
-        sync_log = await sync_accounts(db)
+        mock_provider = _make_mock_provider(SyncResult(accounts=[], transactions=[]))
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_log = await sync_provider(db, "simplefin")
 
         assert sync_log.status == "failed"
-        assert "No SimpleFIN credentials" in sync_log.error_message
+        assert "No credentials" in sync_log.error_message
 
     @pytest.mark.asyncio
     async def test_sync_deduplicates_transactions(self, db):
@@ -358,33 +417,28 @@ class TestSyncAccounts:
         await db.flush()
 
         fixture = load_simplefin_initial_fixture()
-        mock_response = _fixture_to_sfin_response(fixture)
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
+        mock_provider.max_syncs_per_day = 999
 
-        with (
-            patch("app.services.sync.SimpleFINClient") as MockClient,
-            patch("app.services.sync.MAX_SYNCS_PER_DAY", 999),
-        ):
-            mock_instance = MockClient.return_value
-            mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
-
-            # First sync
-            sync_log1 = await sync_accounts(db)
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_log1 = await sync_provider(db, "simplefin")
             assert sync_log1.transactions_added == 3
 
-            # Second sync - same transactions
-            sync_log2 = await sync_accounts(db)
+            sync_log2 = await sync_provider(db, "simplefin")
             assert sync_log2.transactions_added == 3  # counts synced
 
-        # Key assertion: still only 3 transactions (upsert, not insert)
+        # Still only 3 transactions
         transactions = (await db.scalars(select(Transaction))).all()
         assert len(transactions) == 3
 
     @pytest.mark.asyncio
     async def test_sync_rate_limited(self, db):
-        """Sync rejects if daily limit (24 syncs) is reached."""
+        """Sync rejects if daily limit is reached."""
         now = int(time.time())
         for i in range(24):
             db.add(SyncLog(
+                provider="simplefin",
                 started_at=now - (i * 100),
                 completed_at=now - (i * 100),
                 status="success",
@@ -401,8 +455,101 @@ class TestSyncAccounts:
         db.add(cred)
         await db.flush()
 
-        with pytest.raises(RuntimeError, match="Daily limit reached"):
-            await sync_accounts(db)
+        mock_provider = _make_mock_provider(SyncResult(accounts=[], transactions=[]))
+
+        with (
+            patch("app.services.sync.get_provider", return_value=mock_provider),
+            pytest.raises(RateLimitError, match="Daily limit reached"),
+        ):
+            await sync_provider(db, "simplefin")
+
+    @pytest.mark.asyncio
+    async def test_sync_provider_field_on_sync_log(self, db):
+        """SyncLog records the provider name."""
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.flush()
+
+        fixture = load_simplefin_initial_fixture()
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_log = await sync_provider(db, "simplefin")
+
+        assert sync_log.provider == "simplefin"
+
+    @pytest.mark.asyncio
+    async def test_sync_saves_session_data(self, db):
+        """Session data from provider is saved encrypted."""
+        cred = Credential(
+            id="cred_1",
+            provider="nelnet",
+            encrypted_data=encrypt(json.dumps({
+                "username": "user",
+                "password": "pass",
+            })),
+        )
+        db.add(cred)
+        await db.flush()
+
+        session = {"cookies": [{"name": "sid", "value": "abc123"}]}
+        mock_result = SyncResult(
+            accounts=[],
+            transactions=[],
+            session_data=session,
+        )
+        mock_provider = _make_mock_provider(mock_result)
+        mock_provider.provider_name = "nelnet"
+        mock_provider.display_name = "Nelnet Student Loans"
+        mock_provider.max_syncs_per_day = 4
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            await sync_provider(db, "nelnet")
+
+        cred = await db.get(Credential, "cred_1")
+        assert cred.session_data is not None
+        decrypted_session = json.loads(decrypt(cred.session_data))
+        assert decrypted_session["cookies"][0]["value"] == "abc123"
+
+
+class TestSyncAll:
+    """Test sync_all concurrent sync."""
+
+    @pytest.mark.asyncio
+    async def test_sync_all_syncs_connected_providers(self, db):
+        """sync_all syncs all providers with credentials."""
+        cred = Credential(
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(json.dumps({
+                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+            })),
+        )
+        db.add(cred)
+        await db.flush()
+
+        fixture = load_simplefin_initial_fixture()
+        mock_result = _fixture_to_sync_result(fixture)
+        mock_provider = _make_mock_provider(mock_result)
+
+        with patch("app.services.sync.get_provider", return_value=mock_provider):
+            sync_logs = await sync_all(db)
+
+        assert len(sync_logs) == 1
+        assert sync_logs[0].status == "success"
+
+    @pytest.mark.asyncio
+    async def test_sync_all_returns_empty_when_no_providers(self, db):
+        """sync_all returns empty list when no providers connected."""
+        sync_logs = await sync_all(db)
+        assert sync_logs == []
 
 
 class TestTransactionUpdate:

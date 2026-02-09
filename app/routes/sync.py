@@ -1,107 +1,140 @@
-import json
+"""Sync routes — async sync with background tasks and polling."""
+
+from __future__ import annotations
+
 import logging
-import time
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.simplefin import SimpleFINClient
 from app.core.database import get_db
-from app.core.encryption import encrypt
-from app.models import Credential, SyncLog
-from app.schemas import CredentialCreate, CredentialResponse, SyncResponse
-from app.services.sync import sync_accounts
+from app.models import SyncLog
+from app.providers import (
+    AuthenticationError,
+    ProviderError,
+    RateLimitError,
+    get_provider,
+    list_providers,
+)
+from app.schemas import (
+    ProviderSyncStatus,
+    SyncResponse,
+    SyncStatusResponse,
+    SyncTriggerResponse,
+)
+from app.services.sync import get_connected_providers, sync_all, sync_provider
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/credentials", response_model=CredentialResponse)
-async def claim_setup_token(
-    data: CredentialCreate,
+@router.post("/", response_model=SyncTriggerResponse, status_code=202)
+async def trigger_sync_all(
     db: AsyncSession = Depends(get_db),
-) -> Credential:
-    """Claim a SimpleFIN setup token and store the access credentials.
+) -> SyncTriggerResponse:
+    """Sync all connected providers.
 
-    Get a setup token from https://bridge.simplefin.org, then pass it here.
-    Setup tokens are one-time use — a 403 means the token was already claimed.
+    Returns 202 immediately with SyncLog IDs. Poll GET /sync/status for progress.
     """
-    # Check if credentials already exist
-    existing = await db.scalar(
-        select(Credential).where(Credential.provider == "simplefin")
-    )
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="SimpleFIN credentials already configured. Delete existing credentials first.",
-        )
+    connected = await get_connected_providers(db)
+    if not connected:
+        raise HTTPException(status_code=400, detail="No providers connected")
 
+    sync_logs = await sync_all(db)
+    return SyncTriggerResponse(
+        sync_ids=[s.id for s in sync_logs],
+        message=f"Sync started for {len(sync_logs)} provider(s)",
+    )
+
+
+@router.post("/{provider_name}", response_model=SyncTriggerResponse, status_code=202)
+async def trigger_sync_one(
+    provider_name: str,
+    db: AsyncSession = Depends(get_db),
+) -> SyncTriggerResponse:
+    """Sync a single provider.
+
+    Returns 202 immediately with SyncLog ID. Poll GET /sync/status for progress.
+    """
     try:
-        access_url = await SimpleFINClient.claim_setup_token(data.setup_token)
-    except Exception as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        if status == 403:
-            raise HTTPException(
-                status_code=400,
-                detail="Setup token already claimed. Get a new one from bridge.simplefin.org.",
-            ) from None
+        get_provider(provider_name)
+    except KeyError:
         raise HTTPException(
-            status_code=400,
-            detail=f"Failed to claim setup token: {e}",
+            status_code=404, detail=f"Unknown provider: {provider_name}"
         ) from None
 
-    # Encrypt and store
-    now = int(time.time())
-    credential = Credential(
-        id=str(uuid.uuid4()),
-        provider="simplefin",
-        encrypted_data=encrypt(json.dumps({"access_url": access_url})),
-        created_at=now,
-    )
-    db.add(credential)
-    await db.flush()
-
-    return credential
-
-
-@router.delete("/credentials")
-async def delete_credentials(db: AsyncSession = Depends(get_db)) -> dict:
-    """Delete stored SimpleFIN credentials."""
-    credential = await db.scalar(
-        select(Credential).where(Credential.provider == "simplefin")
-    )
-    if not credential:
-        raise HTTPException(status_code=404, detail="No credentials found")
-
-    await db.delete(credential)
-    return {"status": "deleted"}
-
-
-@router.post("/", response_model=SyncResponse)
-async def trigger_sync(
-    db: AsyncSession = Depends(get_db),
-) -> SyncLog:
-    """Trigger a sync from SimpleFIN.
-
-    Fetches accounts and transactions for the date range since last sync
-    (or last 60 days on first sync).
-
-    Returns 429 if synced too recently (~24 requests/day limit).
-    """
     try:
-        sync_log = await sync_accounts(db)
-        return sync_log
+        sync_log = await sync_provider(db, provider_name)
+    except RateLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from None
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from None
     except RuntimeError as e:
-        msg = str(e)
-        if "Daily limit" in msg:
-            raise HTTPException(status_code=429, detail=msg) from None
-        if "SimpleFIN:" in msg:
-            raise HTTPException(status_code=400, detail=msg) from None
-        raise HTTPException(status_code=409, detail=msg) from None
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from None
+        raise HTTPException(status_code=409, detail=str(e)) from None
+
+    return SyncTriggerResponse(
+        sync_ids=[sync_log.id],
+        message=f"Sync started for {provider_name}",
+    )
 
 
+@router.get("/status", response_model=SyncStatusResponse)
+async def sync_status(
+    db: AsyncSession = Depends(get_db),
+) -> SyncStatusResponse:
+    """Get per-provider sync status for polling."""
+    providers = list_providers()
+    statuses: list[ProviderSyncStatus] = []
+    any_running = False
+
+    for p in providers:
+        last_sync = await db.scalar(
+            select(SyncLog)
+            .where(SyncLog.provider == p.provider_name)
+            .order_by(SyncLog.started_at.desc())
+            .limit(1)
+        )
+
+        if last_sync and last_sync.status == "running":
+            any_running = True
+            statuses.append(ProviderSyncStatus(
+                provider=p.provider_name,
+                display_name=p.display_name,
+                status="running",
+                started_at=last_sync.started_at,
+            ))
+        elif last_sync:
+            statuses.append(ProviderSyncStatus(
+                provider=p.provider_name,
+                display_name=p.display_name,
+                status=last_sync.status,
+                started_at=last_sync.started_at,
+                completed_at=last_sync.completed_at,
+                error_message=last_sync.error_message,
+            ))
+        else:
+            statuses.append(ProviderSyncStatus(
+                provider=p.provider_name,
+                display_name=p.display_name,
+                status="idle",
+            ))
+
+    return SyncStatusResponse(providers=statuses, any_running=any_running)
+
+
+@router.get("/logs", response_model=list[SyncResponse])
+async def sync_logs(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+) -> list[SyncLog]:
+    """Get recent sync history."""
+    result = await db.scalars(
+        select(SyncLog)
+        .order_by(SyncLog.started_at.desc())
+        .limit(limit)
+    )
+    return list(result.all())

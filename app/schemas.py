@@ -2,10 +2,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # Credentials
-class CredentialCreate(BaseModel):
-    setup_token: str  # SimpleFIN setup token from bridge.simplefin.org
-
-
 class CredentialResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -82,6 +78,7 @@ class SyncResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    provider: str
     started_at: int
     completed_at: int | None
     status: str
@@ -89,6 +86,42 @@ class SyncResponse(BaseModel):
     transactions_added: int
     transactions_updated: int
     error_message: str | None
+
+
+class SyncTriggerResponse(BaseModel):
+    """Response from POST /sync — returns immediately with SyncLog IDs."""
+
+    sync_ids: list[int]
+    message: str
+
+
+class SyncStatusResponse(BaseModel):
+    """Per-provider sync status for polling."""
+
+    providers: list["ProviderSyncStatus"]
+    any_running: bool
+
+
+class ProviderSyncStatus(BaseModel):
+    """Status of a single provider's sync."""
+
+    provider: str
+    display_name: str
+    status: str  # running, success, failed, idle
+    started_at: int | None = None
+    completed_at: int | None = None
+    error_message: str | None = None
+
+
+# Providers
+class ProviderStatusResponse(BaseModel):
+    """Provider info with connection status."""
+
+    provider: str
+    display_name: str
+    connected: bool
+    last_sync_at: int | None = None
+    last_sync_status: str | None = None
 
 
 # Health
@@ -100,6 +133,7 @@ class SyncError(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     has_credentials: bool
+    providers: list[ProviderStatusResponse]
     last_sync_at: int | None
     last_sync_status: str | None
     account_count: int

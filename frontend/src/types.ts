@@ -52,6 +52,7 @@ export interface TransactionIdsResponse {
 
 export interface SyncLog {
   id: number
+  provider: string
   started_at: number
   completed_at: number | null
   status: string
@@ -59,6 +60,33 @@ export interface SyncLog {
   transactions_added: number
   transactions_updated: number
   error_message: string | null
+}
+
+export interface SyncTriggerResponse {
+  sync_ids: number[]
+  message: string
+}
+
+export interface ProviderSyncStatus {
+  provider: string
+  display_name: string
+  status: string
+  started_at: number | null
+  completed_at: number | null
+  error_message: string | null
+}
+
+export interface SyncStatusResponse {
+  providers: ProviderSyncStatus[]
+  any_running: boolean
+}
+
+export interface ProviderStatus {
+  provider: string
+  display_name: string
+  connected: boolean
+  last_sync_at: number | null
+  last_sync_status: string | null
 }
 
 export interface SpendingCategory {
@@ -76,6 +104,7 @@ export interface SpendingByCategoryResponse {
 export interface HealthResponse {
   status: string
   has_credentials: boolean
+  providers: ProviderStatus[]
   last_sync_at: number | null
   last_sync_status: string | null
   account_count: number

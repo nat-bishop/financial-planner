@@ -1,10 +1,20 @@
 from fastapi import APIRouter
 
-from app.routes import accounts, analytics, categories, health, llm, sync, transactions
+from app.routes import (
+    accounts,
+    analytics,
+    categories,
+    health,
+    llm,
+    providers,
+    sync,
+    transactions,
+)
 
 router = APIRouter()
 
 router.include_router(health.router, tags=["health"])
+router.include_router(providers.router, prefix="/providers", tags=["providers"])
 router.include_router(sync.router, prefix="/sync", tags=["sync"])
 router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 router.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
