@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,10 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
+async def health_check(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HealthResponse:
     """Get system health status including per-provider sync info."""
     # Get last sync (across all providers)
     last_sync = await db.scalar(
@@ -57,6 +60,15 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
             last_sync_status=p_last_sync.status if p_last_sync else None,
         ))
 
+    # Check for security warnings
+    warnings: list[str] = []
+    hostname = request.url.hostname or ""
+    if request.url.scheme == "http" and hostname not in ("localhost", "127.0.0.1"):
+        warnings.append(
+            "Running over HTTP on a non-localhost address. "
+            "Use HTTPS for credential security."
+        )
+
     return HealthResponse(
         status="ok",
         has_credentials=has_creds is not None,
@@ -65,4 +77,5 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
         last_sync_status=last_sync.status if last_sync else None,
         account_count=account_count or 0,
         recent_errors=recent_errors,
+        warnings=warnings,
     )

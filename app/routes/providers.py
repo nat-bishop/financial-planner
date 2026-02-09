@@ -19,9 +19,19 @@ from app.providers import (
     get_provider,
     list_providers,
 )
-from app.schemas import CredentialResponse, ProviderStatusResponse
+from app.schemas import (
+    CredentialResponse,
+    NelnetCredentialInput,
+    ProviderStatusResponse,
+    SimpleFINCredentialInput,
+)
 
 router = APIRouter()
+
+CREDENTIAL_SCHEMAS: dict[str, type] = {
+    "simplefin": SimpleFINCredentialInput,
+    "nelnet": NelnetCredentialInput,
+}
 
 
 @router.get("/", response_model=list[ProviderStatusResponse])
@@ -83,6 +93,14 @@ async def store_credentials(
             detail=f"{provider.display_name} credentials already configured. Delete existing credentials first.",
         )
 
+    schema = CREDENTIAL_SCHEMAS.get(name)
+    if schema:
+        try:
+            validated = schema(**body)
+            body = validated.model_dump()
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+
     try:
         cred_data = await provider.validate_credentials(body)
     except AuthenticationError as e:
@@ -123,6 +141,14 @@ async def update_credentials(
             status_code=404,
             detail=f"No credentials found for {provider.display_name}",
         )
+
+    schema = CREDENTIAL_SCHEMAS.get(name)
+    if schema:
+        try:
+            validated = schema(**body)
+            body = validated.model_dump()
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
 
     try:
         cred_data = await provider.validate_credentials(body)

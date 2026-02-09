@@ -7,6 +7,7 @@ Two layers for testability:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import time
@@ -22,9 +23,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-NELNET_BASE_URL = "https://www.nelnet.net"
-NELNET_DASHBOARD_URL = f"{NELNET_BASE_URL}/Welcome/DashboardV2"
-NELNET_PAYMENTS_URL = f"{NELNET_BASE_URL}/Billing/PaymentHistory"
+NELNET_BASE_URL = "https://nelnet.studentaid.gov"
+NELNET_LOGIN_URL = f"{NELNET_BASE_URL}/account/login"
+NELNET_AUTH_DOMAIN = "auth.nelnet.studentaid.gov"
 
 
 @dataclass
@@ -70,12 +71,12 @@ class NelnetProvider(BrowserProvider):
         session_data: dict | None = None,
     ) -> SyncResult:
         async with self._browser_session(session_data) as (page, context):
-            # Navigate to dashboard
-            await page.goto(NELNET_DASHBOARD_URL, wait_until="networkidle")
+            # Navigate to login page
+            await page.goto(NELNET_LOGIN_URL, wait_until="networkidle")
             await self._random_delay(1000, 2000)
 
-            # Check if we need to log in (redirected to login page)
-            if "/login" in page.url.lower() or "/sign" in page.url.lower():
+            # Check if we need to log in (on login page or auth domain)
+            if self._needs_login(page):
                 log.info("Session expired, logging in")
                 await self._login(page, credential_data)
 
@@ -92,35 +93,62 @@ class NelnetProvider(BrowserProvider):
                 session_data=session,
             )
 
-    async def _login(self, page: Page, creds: dict) -> None:
-        """Fill credentials and submit login form."""
-        try:
-            # Wait for login form
-            await page.wait_for_selector("#UserName", timeout=10_000)
+    def _needs_login(self, page: Page) -> bool:
+        """Check if the current page is a login/auth page."""
+        url = page.url.lower()
+        return (
+            NELNET_AUTH_DOMAIN in url
+            or "/account/login" in url
+            or "/Account/Login" in page.url
+        )
 
-            # Type credentials with human-like delays
-            await self._type_like_human(page, "#UserName", creds["username"])
+    async def _login(self, page: Page, creds: dict) -> None:
+        """Handle Nelnet's two-stage OAuth login flow.
+
+        Stage 1: Landing page at nelnet.studentaid.gov/account/login
+                 Click "Continue" → opens auth popup
+        Stage 2: Auth popup at auth.nelnet.studentaid.gov
+                 Fill username/password → click "Continue"
+        """
+        try:
+            # Stage 1: Click "Continue" on the landing page, which opens auth popup
+            continue_btn = page.get_by_role("button", name="Continue")
+            await continue_btn.wait_for(timeout=10_000)
+
+            auth_page = await self._expect_popup(
+                page, lambda: continue_btn.click()
+            )
+            await self._random_delay(500, 1000)
+
+            # Stage 2: Fill credentials in the auth popup
+            username_field = 'input[name="Username"], [aria-label="Username"]'
+            password_field = 'input[name="Password"], [aria-label="Password"]'
+
+            await auth_page.wait_for_selector(username_field, timeout=10_000)
+
+            await self._type_like_human(auth_page, username_field, creds["username"])
             await self._random_delay(200, 500)
-            await self._type_like_human(page, "#Password", creds["password"])
+            await self._type_like_human(auth_page, password_field, creds["password"])
             await self._random_delay(300, 700)
 
-            # Submit
-            await page.click('button[type="submit"], input[type="submit"]')
+            await auth_page.get_by_role("button", name="Continue").click()
             await self._random_delay(2000, 4000)
 
             # Check for 2FA or security challenge
-            current_url = page.url.lower()
+            current_url = auth_page.url.lower()
             if "challenge" in current_url or "verify" in current_url or "mfa" in current_url:
                 log.info("2FA/MFA challenge detected, waiting for user")
                 await self._wait_for_user(
-                    page,
+                    auth_page,
                     "Complete 2FA verification in the browser window",
-                    "#dashboard, .dashboard, [data-testid='dashboard']",
+                    f'a[href*="{NELNET_BASE_URL}"], [data-testid="dashboard"]',
                     timeout=120_000,
                 )
 
-            # Check for login errors
-            error_el = await page.query_selector(".validation-summary-errors, .error-message")
+            # Check for login errors in the auth popup
+            error_el = await auth_page.query_selector(
+                ".validation-summary-errors, .error-message, .field-validation-error"
+            )
             if error_el:
                 error_text = await error_el.inner_text()
                 raise AuthenticationError(
@@ -128,8 +156,20 @@ class NelnetProvider(BrowserProvider):
                     self.provider_name,
                 )
 
-            # Wait for dashboard to load
-            await page.wait_for_url("**/Dashboard**", timeout=30_000)
+            # Wait for auth to complete — popup redirects back to main site
+            # or closes. Either way, the main page should eventually load.
+            with contextlib.suppress(Exception):
+                await auth_page.wait_for_url(
+                    f"**{NELNET_BASE_URL}/**", timeout=30_000
+                )
+
+            # Verify we're authenticated on the main page
+            await page.wait_for_load_state("networkidle")
+            if self._needs_login(page):
+                raise AuthenticationError(
+                    "Login appeared to succeed but session was not established",
+                    self.provider_name,
+                )
 
         except AuthenticationError:
             raise
@@ -146,13 +186,20 @@ class NelnetProvider(BrowserProvider):
             ) from e
 
     async def _scrape_accounts(self, page: Page) -> list[NelnetAccountData]:
-        """Scrape account data from the dashboard."""
+        """Scrape account data from the dashboard.
+
+        NOTE: Selectors below are best-guesses — the real dashboard DOM
+        could not be verified without logging in. These use broad fallback
+        selectors to improve resilience.
+        """
         accounts: list[NelnetAccountData] = []
         try:
-            await page.goto(NELNET_DASHBOARD_URL, wait_until="networkidle")
+            # Ensure we're on the main site (not auth domain)
+            if NELNET_BASE_URL not in page.url:
+                await page.goto(NELNET_BASE_URL, wait_until="networkidle")
             await self._random_delay(1000, 2000)
 
-            # Look for loan group sections
+            # Look for loan group sections (unverified selectors)
             loan_sections = await page.query_selector_all(
                 ".loan-group, .account-summary, [data-loan-group]"
             )
@@ -206,12 +253,32 @@ class NelnetProvider(BrowserProvider):
         return accounts
 
     async def _scrape_payments(self, page: Page) -> list[NelnetPaymentData]:
-        """Scrape payment history."""
+        """Scrape payment history.
+
+        NOTE: Payment page URL and table selectors are best-guesses —
+        the real page could not be verified without logging in. Navigates
+        via link discovery rather than hardcoded URL.
+        """
         payments: list[NelnetPaymentData] = []
         try:
-            await page.goto(NELNET_PAYMENTS_URL, wait_until="networkidle")
+            # Try to find a payment history link on the current page
+            # rather than using a hardcoded URL (unverified selectors)
+            payment_link = await page.query_selector(
+                'a[href*="payment" i], a[href*="billing" i], '
+                'a:has-text("Payment History"), a:has-text("Billing")'
+            )
+            if payment_link:
+                await payment_link.click()
+                await page.wait_for_load_state("networkidle")
+            else:
+                # Fallback: try a likely URL path
+                await page.goto(
+                    f"{NELNET_BASE_URL}/billing/paymenthistory",
+                    wait_until="networkidle",
+                )
             await self._random_delay(1000, 2000)
 
+            # Unverified selectors — broad fallbacks
             rows = await page.query_selector_all(
                 "table tbody tr, .payment-row, [data-payment]"
             )

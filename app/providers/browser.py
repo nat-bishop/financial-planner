@@ -7,15 +7,15 @@ Handles session persistence (cookies/localStorage) to avoid repeated 2FA.
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from app.core.config import settings
 from app.providers.base import FinanceProvider, ProviderError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from playwright.async_api import BrowserContext, Page
 
@@ -43,7 +43,7 @@ class BrowserProvider(FinanceProvider):
 
         Args:
             session_data: Playwright storageState dict to restore.
-            headless: Override headless mode. Default: BROWSER_HEADLESS env var.
+            headless: Override headless mode. Default: settings.browser_headless.
 
         Yields:
             (page, context) tuple.
@@ -58,7 +58,7 @@ class BrowserProvider(FinanceProvider):
             ) from e
 
         if headless is None:
-            headless = os.environ.get("BROWSER_HEADLESS", "").lower() in ("1", "true")
+            headless = settings.browser_headless
 
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(
@@ -67,7 +67,10 @@ class BrowserProvider(FinanceProvider):
         )
         try:
             ctx_args: dict = {
-                "viewport": {"width": 1280, "height": 800},
+                "viewport": {
+                    "width": settings.browser_viewport_width,
+                    "height": settings.browser_viewport_height,
+                },
                 "user_agent": _USER_AGENT,
             }
             if session_data:
@@ -75,11 +78,33 @@ class BrowserProvider(FinanceProvider):
             context = await browser.new_context(**ctx_args)
             page = await context.new_page()
             await stealth_async(page)
-            page.set_default_timeout(30_000)  # 30s per-operation timeout
+            page.set_default_timeout(settings.browser_operation_timeout_ms)
             yield page, context
         finally:
             await browser.close()
             await pw.stop()
+
+    async def _expect_popup(
+        self,
+        page: Page,
+        trigger_action: Callable[[], Awaitable[None]],
+    ) -> Page:
+        """Execute trigger_action and return the popup page.
+
+        Useful for OAuth flows that open a new tab/popup for authentication.
+
+        Args:
+            page: The current page whose context will spawn the popup.
+            trigger_action: Async callable that triggers the popup (e.g. clicking a button).
+
+        Returns:
+            The popup Page object, after it has finished loading.
+        """
+        async with page.context.expect_page() as popup_info:
+            await trigger_action()
+        popup = await popup_info.value
+        await popup.wait_for_load_state("networkidle")
+        return popup
 
     async def _random_delay(self, min_ms: int = 500, max_ms: int = 2000) -> None:
         """Human-like pause between actions."""
@@ -91,7 +116,13 @@ class BrowserProvider(FinanceProvider):
         """Type text with random delays between keystrokes."""
         await page.click(selector)
         for char in text:
-            await page.keyboard.type(char, delay=random.randint(50, 150))
+            await page.keyboard.type(
+                char,
+                delay=random.randint(
+                    settings.browser_keystroke_delay_min_ms,
+                    settings.browser_keystroke_delay_max_ms,
+                ),
+            )
 
     async def _wait_for_user(
         self,
