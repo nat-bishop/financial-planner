@@ -50,12 +50,12 @@ class BrowserProvider(FinanceProvider):
         """
         try:
             from playwright.async_api import async_playwright
-            from playwright_stealth import stealth_async
-        except ImportError as e:
+            from playwright_stealth import Stealth
+        except ImportError:
             raise ProviderError(
                 "Playwright not installed. Run: pip install playwright playwright-stealth && playwright install chromium",
                 self.provider_name,
-            ) from e
+            ) from None
 
         if headless is None:
             headless = settings.browser_headless
@@ -77,7 +77,8 @@ class BrowserProvider(FinanceProvider):
                 ctx_args["storage_state"] = session_data
             context = await browser.new_context(**ctx_args)
             page = await context.new_page()
-            await stealth_async(page)
+            stealth = Stealth()
+            await stealth.apply_stealth_async(page)
             page.set_default_timeout(settings.browser_operation_timeout_ms)
             yield page, context
         finally:
@@ -103,7 +104,7 @@ class BrowserProvider(FinanceProvider):
         async with page.context.expect_page() as popup_info:
             await trigger_action()
         popup = await popup_info.value
-        await popup.wait_for_load_state("networkidle")
+        await popup.wait_for_load_state("load")
         return popup
 
     async def _random_delay(self, min_ms: int = 500, max_ms: int = 2000) -> None:

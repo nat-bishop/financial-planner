@@ -70,9 +70,31 @@ class NelnetProvider(BrowserProvider):
         cursor: str | None,
         session_data: dict | None = None,
     ) -> SyncResult:
+        try:
+            return await self._do_sync(credential_data, cursor, session_data)
+        except (AuthenticationError, ProviderError):
+            raise
+        except Exception as e:
+            if "timeout" in str(e).lower():
+                raise ProviderError(
+                    "Browser operation timed out. The site may be slow or unresponsive.",
+                    self.provider_name,
+                    detail={"error": str(e)},
+                ) from e
+            raise ProviderError(
+                f"Browser error: {e}",
+                self.provider_name,
+            ) from e
+
+    async def _do_sync(
+        self,
+        credential_data: dict,
+        cursor: str | None,
+        session_data: dict | None = None,
+    ) -> SyncResult:
         async with self._browser_session(session_data) as (page, context):
             # Navigate to login page
-            await page.goto(NELNET_LOGIN_URL, wait_until="networkidle")
+            await page.goto(NELNET_LOGIN_URL, wait_until="load")
             await self._random_delay(1000, 2000)
 
             # Check if we need to log in (on login page or auth domain)
@@ -102,51 +124,74 @@ class NelnetProvider(BrowserProvider):
             or "/Account/Login" in page.url
         )
 
-    async def _login(self, page: Page, creds: dict) -> None:
-        """Handle Nelnet's two-stage OAuth login flow.
+    async def _dismiss_consent_overlay(self, page: Page) -> None:
+        """Remove Transcend consent manager overlay that blocks clicks."""
+        await page.evaluate("""() => {
+            const el = document.getElementById('transcend-consent-manager');
+            if (el) el.remove();
+        }""")
 
-        Stage 1: Landing page at nelnet.studentaid.gov/account/login
-                 Click "Continue" → opens auth popup
-        Stage 2: Auth popup at auth.nelnet.studentaid.gov
-                 Fill username/password → click "Continue"
+    async def _login(self, page: Page, creds: dict) -> None:
+        """Handle Nelnet's login flow (same-tab redirect, not popup).
+
+        Flow (verified against real site):
+        1. Login page: dismiss consent overlay, click "Continue" (borrower)
+        2. Federal disclaimer: click "Accept"
+        3. Redirects to auth.nelnet.studentaid.gov/Account/Login
+        4. Fill username (#username-textfield) and password (#password-textfield)
+        5. Click "Continue" to submit
+        6. Handle 2FA if prompted, then redirect back to main site
         """
         try:
-            # Stage 1: Click "Continue" on the landing page, which opens auth popup
-            continue_btn = page.get_by_role("button", name="Continue")
-            await continue_btn.wait_for(timeout=10_000)
+            # Step 1: Dismiss consent overlay and click Continue
+            await self._dismiss_consent_overlay(page)
+            await self._random_delay(300, 600)
 
-            auth_page = await self._expect_popup(
-                page, lambda: continue_btn.click()
-            )
+            continue_btn = page.get_by_role("button", name="Continue")
+            await continue_btn.wait_for(timeout=30_000)
+            await continue_btn.click()
             await self._random_delay(500, 1000)
 
-            # Stage 2: Fill credentials in the auth popup
-            username_field = 'input[name="Username"], [aria-label="Username"]'
-            password_field = 'input[name="Password"], [aria-label="Password"]'
+            # Step 2: Accept federal disclaimer
+            accept_btn = page.get_by_role("button", name="Accept")
+            await accept_btn.click(timeout=10_000)
+            await self._random_delay(1000, 2000)
 
-            await auth_page.wait_for_selector(username_field, timeout=10_000)
+            # Step 3: Wait for redirect to auth page
+            await page.wait_for_url(
+                f"**{NELNET_AUTH_DOMAIN}/**", timeout=30_000
+            )
+            await page.wait_for_load_state("load")
+            await self._random_delay(500, 1000)
 
-            await self._type_like_human(auth_page, username_field, creds["username"])
+            # Step 4: Fill credentials
+            username_field = "#username-textfield"
+            password_field = "#password-textfield"
+
+            await page.wait_for_selector(username_field, timeout=15_000)
+
+            await self._type_like_human(page, username_field, creds["username"])
             await self._random_delay(200, 500)
-            await self._type_like_human(auth_page, password_field, creds["password"])
+            await self._type_like_human(page, password_field, creds["password"])
             await self._random_delay(300, 700)
 
-            await auth_page.get_by_role("button", name="Continue").click()
+            # Step 5: Submit login
+            await page.get_by_role("button", name="Continue").click()
             await self._random_delay(2000, 4000)
 
-            # Check for 2FA or security challenge
-            current_url = auth_page.url.lower()
+            # Step 6: Check for 2FA or security challenge
+            current_url = page.url.lower()
             if "challenge" in current_url or "verify" in current_url or "mfa" in current_url:
                 log.info("2FA/MFA challenge detected, waiting for user")
                 await self._wait_for_user(
-                    auth_page,
+                    page,
                     "Complete 2FA verification in the browser window",
                     f'a[href*="{NELNET_BASE_URL}"], [data-testid="dashboard"]',
                     timeout=120_000,
                 )
 
-            # Check for login errors in the auth popup
-            error_el = await auth_page.query_selector(
+            # Check for login errors
+            error_el = await page.query_selector(
                 ".validation-summary-errors, .error-message, .field-validation-error"
             )
             if error_el:
@@ -156,15 +201,18 @@ class NelnetProvider(BrowserProvider):
                     self.provider_name,
                 )
 
-            # Wait for auth to complete — popup redirects back to main site
-            # or closes. Either way, the main page should eventually load.
+            # Wait for redirect back to main site after auth
             with contextlib.suppress(Exception):
-                await auth_page.wait_for_url(
+                await page.wait_for_url(
                     f"**{NELNET_BASE_URL}/**", timeout=30_000
                 )
 
-            # Verify we're authenticated on the main page
-            await page.wait_for_load_state("networkidle")
+            # Ensure we're on the main site dashboard
+            if NELNET_AUTH_DOMAIN in page.url or "/account/login" in page.url.lower():
+                await page.goto(NELNET_BASE_URL, wait_until="load")
+                await self._random_delay(1000, 2000)
+
+            # Verify we're authenticated
             if self._needs_login(page):
                 raise AuthenticationError(
                     "Login appeared to succeed but session was not established",
@@ -194,9 +242,9 @@ class NelnetProvider(BrowserProvider):
         """
         accounts: list[NelnetAccountData] = []
         try:
-            # Ensure we're on the main site (not auth domain)
-            if NELNET_BASE_URL not in page.url:
-                await page.goto(NELNET_BASE_URL, wait_until="networkidle")
+            # Ensure we're on the main site dashboard (not login or auth page)
+            if self._needs_login(page) or NELNET_AUTH_DOMAIN in page.url:
+                await page.goto(NELNET_BASE_URL, wait_until="load")
             await self._random_delay(1000, 2000)
 
             # Look for loan group sections (unverified selectors)
@@ -269,12 +317,12 @@ class NelnetProvider(BrowserProvider):
             )
             if payment_link:
                 await payment_link.click()
-                await page.wait_for_load_state("networkidle")
+                await page.wait_for_load_state("load")
             else:
                 # Fallback: try a likely URL path
                 await page.goto(
                     f"{NELNET_BASE_URL}/billing/paymenthistory",
-                    wait_until="networkidle",
+                    wait_until="load",
                 )
             await self._random_delay(1000, 2000)
 

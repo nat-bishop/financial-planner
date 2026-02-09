@@ -108,10 +108,11 @@ async def sync_provider(db: AsyncSession, provider_name: str) -> SyncLog:
     await _check_rate_limit(db, provider)
 
     async with lock:
-        # Timeout: 30s for API providers, 180s for browser providers
+        # Timeout: 30s for API providers, 300s for browser providers
+        # (browser providers may need 2FA on first login)
         from app.providers.browser import BrowserProvider
 
-        timeout = 180 if isinstance(provider, BrowserProvider) else 30
+        timeout = 300 if isinstance(provider, BrowserProvider) else 30
         try:
             return await asyncio.wait_for(
                 _run_sync(db, provider), timeout=timeout

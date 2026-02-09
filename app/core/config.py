@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     browser_headless: bool = False
     browser_viewport_width: int = 1280
     browser_viewport_height: int = 800
-    browser_operation_timeout_ms: int = 30000
+    browser_operation_timeout_ms: int = 60000
     browser_keystroke_delay_min_ms: int = 50
     browser_keystroke_delay_max_ms: int = 150
 
