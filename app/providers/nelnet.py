@@ -7,11 +7,14 @@ Two layers for testability:
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import hashlib
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
 
 from app.providers.base import AuthenticationError, ProviderError, TwoFAHandler
@@ -74,7 +77,7 @@ class NelnetProvider(BrowserProvider):
     ) -> SyncResult:
         try:
             return await self._do_sync(credential_data, cursor, session_data, two_fa_handler)
-        except (AuthenticationError, ProviderError):
+        except ProviderError:
             raise
         except Exception as e:
             if "timeout" in str(e).lower():
@@ -219,8 +222,6 @@ class NelnetProvider(BrowserProvider):
                     self.provider_name,
                 )
 
-        except AuthenticationError:
-            raise
         except ProviderError:
             raise
         except Exception as e:
@@ -560,8 +561,6 @@ def _parse_currency(text: str) -> int:
     negative = cleaned.startswith(("-", "("))
     cleaned = cleaned.strip("()-")
     try:
-        from decimal import ROUND_HALF_UP, Decimal
-
         cents = int((Decimal(cleaned) * 100).to_integral_value(rounding=ROUND_HALF_UP))
         return -cents if negative else cents
     except Exception:
@@ -570,9 +569,6 @@ def _parse_currency(text: str) -> int:
 
 def _parse_date(date_str: str) -> int:
     """Parse MM/DD/YYYY to Unix timestamp."""
-    import calendar
-    from datetime import datetime
-
     try:
         dt = datetime.strptime(date_str.strip(), "%m/%d/%Y")
         return int(calendar.timegm(dt.timetuple()))
@@ -622,6 +618,12 @@ def _to_provider_transactions(
         # Build the first account ID to link to
         account_id = _stable_id("nelnet", "account", "Nelnet Student Loan")
 
+        extra = {}
+        if p.principal is not None:
+            extra["principal"] = p.principal
+        if p.interest is not None:
+            extra["interest"] = p.interest
+
         result.append(ProviderTransaction(
             id=tx_id,
             account_id=account_id,
@@ -629,14 +631,7 @@ def _to_provider_transactions(
             date=tx_date,
             description=p.description or f"Nelnet Payment {p.date}",
             pending=False,
-            extra={
-                k: v
-                for k, v in {
-                    "principal": p.principal,
-                    "interest": p.interest,
-                }.items()
-                if v is not None
-            } or None,
+            extra=extra or None,
         ))
 
     return result

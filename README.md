@@ -1,6 +1,6 @@
 # Finance Planner
 
-Personal finance app that syncs your bank accounts via [SimpleFIN Bridge](https://bridge.simplefin.org). Features smart transaction categorization that learns from your corrections.
+Personal finance app that syncs bank accounts from multiple providers (SimpleFIN Bridge, Nelnet). Syncs run in the background with 2FA relay for browser-based providers. Features smart transaction categorization that learns from your corrections.
 
 ## Quick Start
 
@@ -19,13 +19,23 @@ make stop           # Stop all services
 
 Visit `http://localhost:5173` for the app, or `http://localhost:8000/docs` for API docs.
 
-## SimpleFIN Setup
+## Provider Setup
+
+### SimpleFIN
 
 1. Go to [bridge.simplefin.org](https://bridge.simplefin.org) and create a setup token
 2. Paste the token in the app UI
 3. The app claims the token, stores encrypted credentials, and syncs your accounts
 
 Setup tokens are one-time use. If you need to reconnect, get a new token.
+
+### Nelnet
+
+1. Enter your Nelnet username and password in the app UI
+2. The app logs in via headless browser (Playwright) and scrapes account data
+3. If Nelnet requires 2FA, a modal appears in the app -- enter the code to continue
+
+Syncs run in the background. The frontend polls `/sync/status` and shows progress per provider.
 
 ## Local Development (no Docker)
 
@@ -61,9 +71,12 @@ make lint            # Lint with ruff
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Status, last sync time, account count |
-| `/sync/credentials` | POST | Claim SimpleFIN setup token |
-| `/sync/credentials` | DELETE | Remove stored credentials |
-| `/sync/` | POST | Trigger sync (429 if rate limited, 409 if running) |
+| `/sync/` | POST | Trigger sync for all providers (returns 202, poll `/sync/status`) |
+| `/sync/{provider}` | POST | Trigger sync for one provider (returns 202) |
+| `/sync/status` | GET | Per-provider sync status (polling endpoint) |
+| `/sync/logs` | GET | Recent sync history |
+| `/sync/{id}/2fa` | POST | Submit 2FA code for an active sync |
+| `/sync/{id}/2fa` | GET | Get 2FA challenge details |
 | `/accounts/` | GET | List accounts (with pagination) |
 | `/accounts/{id}` | GET | Get single account |
 | `/transactions/` | GET | List transactions (with filters + search) |
@@ -74,6 +87,7 @@ make lint            # Lint with ruff
 | `/llm/categorize` | POST | Auto-categorize transactions (memory matching + LLM fallback) |
 | `/providers/` | GET | List providers with connection status |
 | `/providers/{name}/credentials` | POST | Store provider credentials |
+| `/providers/{name}/credentials` | PUT | Update provider credentials |
 | `/providers/{name}/credentials` | DELETE | Remove provider credentials |
 
 ## Configuration

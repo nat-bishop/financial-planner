@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -52,8 +53,6 @@ async def _mark_stale_syncs() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import asyncio
-
     Path("data").mkdir(parents=True, exist_ok=True)
     try:
         # Run in thread — alembic env.py calls asyncio.run() which needs its own loop

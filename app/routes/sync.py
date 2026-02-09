@@ -144,42 +144,32 @@ async def sync_status(
             .limit(1)
         )
 
-        if last_sync and last_sync.status == "running":
-            any_running = True
-            statuses.append(ProviderSyncStatus(
-                provider=p.provider_name,
-                display_name=p.display_name,
-                status="running",
-                started_at=last_sync.started_at,
-            ))
-        elif last_sync and last_sync.status == "awaiting_2fa":
-            any_running = True
-            # Look up in-memory session for challenge details
-            session = get_session(last_sync.id)
-            statuses.append(ProviderSyncStatus(
-                provider=p.provider_name,
-                display_name=p.display_name,
-                status="awaiting_2fa",
-                started_at=last_sync.started_at,
-                two_fa_sync_id=last_sync.id,
-                two_fa_method=last_sync.two_fa_method,
-                two_fa_prompt=session.challenge.prompt if session else None,
-            ))
-        elif last_sync:
-            statuses.append(ProviderSyncStatus(
-                provider=p.provider_name,
-                display_name=p.display_name,
-                status=last_sync.status,
-                started_at=last_sync.started_at,
-                completed_at=last_sync.completed_at,
-                error_message=last_sync.error_message,
-            ))
-        else:
+        if not last_sync:
             statuses.append(ProviderSyncStatus(
                 provider=p.provider_name,
                 display_name=p.display_name,
                 status="idle",
             ))
+            continue
+
+        status = ProviderSyncStatus(
+            provider=p.provider_name,
+            display_name=p.display_name,
+            status=last_sync.status,
+            started_at=last_sync.started_at,
+            completed_at=last_sync.completed_at,
+            error_message=last_sync.error_message,
+        )
+
+        if last_sync.status in ("running", "awaiting_2fa"):
+            any_running = True
+            if last_sync.status == "awaiting_2fa":
+                session = get_session(last_sync.id)
+                status.two_fa_sync_id = last_sync.id
+                status.two_fa_method = last_sync.two_fa_method
+                status.two_fa_prompt = session.challenge.prompt if session else None
+
+        statuses.append(status)
 
     return SyncStatusResponse(providers=statuses, any_running=any_running)
 

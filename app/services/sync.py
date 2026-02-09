@@ -19,7 +19,6 @@ from app.core.database import async_session_maker
 from app.core.encryption import decrypt, encrypt
 from app.models import Account, Credential, SyncLog, Transaction
 from app.providers import (
-    AuthenticationError,
     ProviderError,
     RateLimitError,
     get_provider,
@@ -164,29 +163,17 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
                         _run_sync(db, provider, sync_log, two_fa_handler=handler),
                         timeout=timeout,
                     )
-                    await db.commit()
                 except TimeoutError:
-                    sync_log.status = "failed"
-                    sync_log.error_message = f"Sync timed out after {timeout}s"
-                    sync_log.completed_at = int(time.time())
-                    await db.commit()
+                    _fail_sync_log(sync_log, f"Sync timed out after {timeout}s")
                 except TwoFATimeoutError as e:
-                    sync_log.status = "failed"
-                    sync_log.two_fa_status = "timed_out"
-                    sync_log.error_message = str(e)
-                    sync_log.completed_at = int(time.time())
-                    await db.commit()
-                except (ProviderError, AuthenticationError, RateLimitError) as e:
-                    sync_log.status = "failed"
-                    sync_log.error_message = str(e)
-                    sync_log.completed_at = int(time.time())
-                    await db.commit()
+                    _fail_sync_log(sync_log, str(e), two_fa_status="timed_out")
+                except ProviderError as e:
+                    _fail_sync_log(sync_log, str(e))
                 except Exception as e:
                     log.error("Background sync failed for %s: %s", provider_name, e)
-                    sync_log.status = "failed"
-                    sync_log.error_message = str(e)
-                    sync_log.completed_at = int(time.time())
-                    await db.commit()
+                    _fail_sync_log(sync_log, str(e))
+
+                await db.commit()
         except Exception as e:
             # Session itself might be broken — try a fresh one for the error update
             log.error("Background sync session error for %s: %s", provider_name, e)
@@ -202,6 +189,19 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
                 log.error("Failed to update SyncLog %d after error", sync_log_id)
         finally:
             remove_session(sync_log_id)
+
+
+def _fail_sync_log(
+    sync_log: SyncLog,
+    error_message: str,
+    two_fa_status: str | None = None,
+) -> None:
+    """Mark a SyncLog as failed with an error message."""
+    sync_log.status = "failed"
+    sync_log.error_message = error_message
+    sync_log.completed_at = int(time.time())
+    if two_fa_status:
+        sync_log.two_fa_status = two_fa_status
 
 
 def _build_2fa_handler(
