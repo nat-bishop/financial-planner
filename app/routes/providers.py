@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -70,7 +71,7 @@ async def list_provider_status(
 @router.post("/{name}/credentials", response_model=CredentialResponse)
 async def store_credentials(
     name: str,
-    body: dict,
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> Credential:
     """Store credentials for a provider.
@@ -125,7 +126,7 @@ async def store_credentials(
 @router.put("/{name}/credentials", response_model=CredentialResponse)
 async def update_credentials(
     name: str,
-    body: dict,
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> Credential:
     """Update credentials for a provider."""
@@ -170,7 +171,7 @@ async def update_credentials(
 async def delete_credentials(
     name: str,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     """Delete credentials and session data for a provider."""
     credential = await db.scalar(select(Credential).where(Credential.provider == name))
     if not credential:

@@ -2,6 +2,7 @@ import calendar
 import json
 import logging
 import time
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
@@ -27,6 +28,46 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Multipliers to annualize different pay frequencies to monthly
+_FREQUENCY_TO_MONTHLY: dict[str, float] = {
+    "monthly": 1.0,
+    "biweekly": 26 / 12,
+    "weekly": 52 / 12,
+}
+
+# Default S&P 500 historical return bands
+_DEFAULT_RETURNS = {"low": 0.04, "average": 0.10, "high": 0.14}
+
+
+def _exclude_categories(query):
+    """Filter out transactions whose category is marked exclude_from_totals."""
+    excluded = select(Category.name).where(
+        Category.exclude_from_totals == True  # noqa: E712
+    )
+    return query.where(Transaction.category.notin_(excluded))
+
+
+async def _avg_monthly_amount(
+    db: AsyncSession, *, positive: bool, months: int = 3
+) -> int:
+    """Average monthly income or expense over the last N months."""
+    cutoff = int(time.time()) - (months * 30 * 24 * 60 * 60)
+    condition = Transaction.amount > 0 if positive else Transaction.amount < 0
+    query = (
+        select(func.sum(Transaction.amount))
+        .where(condition)
+        .where(Transaction.posted_at >= cutoff)
+    )
+    query = exclude_disabled_accounts(query)
+    result = await db.execute(query)
+    total = abs(result.scalar() or 0)
+    return total // months
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 
 @router.get("/monthly-trend", response_model=MonthlyTrendResponse)
 async def monthly_trend(
@@ -34,13 +75,8 @@ async def monthly_trend(
     include_excluded: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> MonthlyTrendResponse:
-    """Get monthly income and expense totals.
-
-    Returns one bucket per month with income, expenses, and net amounts.
-    """
-    now = int(time.time())
-    start_ts = now - (months * 30 * 24 * 60 * 60)
-
+    """Get monthly income and expense totals."""
+    start_ts = int(time.time()) - (months * 30 * 24 * 60 * 60)
     month_col = func.strftime("%Y-%m", Transaction.posted_at, "unixepoch")
 
     query = (
@@ -59,15 +95,10 @@ async def monthly_trend(
         .order_by(month_col)
     )
     query = exclude_disabled_accounts(query)
-
     if not include_excluded:
-        excluded_names = select(Category.name).where(
-            Category.exclude_from_totals == True  # noqa: E712
-        )
-        query = query.where(Transaction.category.notin_(excluded_names))
+        query = _exclude_categories(query)
 
-    result = await db.execute(query)
-    rows = result.all()
+    rows = (await db.execute(query)).all()
 
     buckets = []
     for row in rows:
@@ -96,20 +127,10 @@ async def spending_by_category(
     include_excluded: bool = False,
     db: AsyncSession = Depends(get_db),
 ) -> SpendingByCategoryResponse:
-    """Get spending totals grouped by category.
-
-    Args:
-        start_date: Filter by posted_at >= start_date (Unix timestamp, default: 30 days ago)
-        end_date: Filter by posted_at <= end_date (Unix timestamp, default: now)
-        include_excluded: If True, include categories marked exclude_from_totals (default: False)
-
-    Returns:
-        Spending totals by category (only includes negative amounts / expenses)
-    """
+    """Get spending totals grouped by category."""
     now = int(time.time())
-
     if start_date is None:
-        start_date = now - (30 * 24 * 60 * 60)  # 30 days ago
+        start_date = now - (30 * 24 * 60 * 60)
     if end_date is None:
         end_date = now
 
@@ -117,24 +138,19 @@ async def spending_by_category(
         select(
             Transaction.category,
             func.sum(Transaction.amount).label("total"),
-            func.count(Transaction.id).label("count"),
+            func.count(Transaction.id).label("cnt"),
         )
         .where(Transaction.posted_at >= start_date)
         .where(Transaction.posted_at <= end_date)
-        .where(Transaction.amount < 0)  # Only expenses
+        .where(Transaction.amount < 0)
         .group_by(Transaction.category)
-        .order_by(func.sum(Transaction.amount))  # Most spending first
+        .order_by(func.sum(Transaction.amount))
     )
     query = exclude_disabled_accounts(query)
-
     if not include_excluded:
-        excluded_names = select(Category.name).where(
-            Category.exclude_from_totals == True  # noqa: E712
-        )
-        query = query.where(Transaction.category.notin_(excluded_names))
+        query = _exclude_categories(query)
 
-    result = await db.execute(query)
-    rows = result.all()
+    rows = (await db.execute(query)).all()
 
     # Build lookup of excluded category names (only needed when including excluded)
     excluded_set: set[str] = set()
@@ -147,8 +163,8 @@ async def spending_by_category(
     categories = [
         SpendingByCategory(
             category=row.category,
-            total=abs(row.total),  # Return as positive for readability
-            count=row.count,
+            total=abs(row.total),
+            count=row.cnt,
             exclude_from_totals=row.category in excluded_set,
         )
         for row in rows
@@ -170,28 +186,8 @@ async def recurring_bills(
     patterns = await detect_recurring(
         db, lookback_months=lookback_months, direction="expense"
     )
-
-    bills = [
-        RecurringBill(
-            description=p.description,
-            raw_description=p.raw_description,
-            account_id=p.account_id,
-            account_name=p.account_name,
-            frequency=p.frequency,
-            median_amount=p.median_amount,
-            last_occurrence=p.last_occurrence,
-            predicted_next=p.predicted_next,
-            occurrence_count=p.occurrence_count,
-            confidence=p.confidence,
-        )
-        for p in patterns
-    ]
-
+    bills = [RecurringBill(**asdict(p)) for p in patterns]
     return RecurringBillsResponse(bills=bills, lookback_months=lookback_months)
-
-
-# Default S&P 500 historical return bands
-_DEFAULT_RETURNS = {"low": 0.04, "average": 0.10, "high": 0.14}
 
 
 def _compute_projection(
@@ -226,98 +222,94 @@ def _compute_projection(
     return bands
 
 
+async def _load_projection_settings(
+    db: AsyncSession,
+) -> tuple[bool, list[IncomeSource], int | None, dict[str, float]]:
+    """Load user-configured projection settings.
+
+    Returns (is_configured, income_sources, contribution_override, return_rates).
+    """
+    is_configured = False
+    income_sources: list[IncomeSource] = []
+    contribution_override: int | None = None
+    return_rates = dict(_DEFAULT_RETURNS)
+
+    parsers: dict[str, type] = {
+        "projection_income_sources": list,
+        "projection_monthly_contribution": int,
+        "projection_return_rates": dict,
+    }
+
+    for key in parsers:
+        setting = await db.get(UserSetting, key)
+        if not setting:
+            continue
+        is_configured = True
+        try:
+            val = json.loads(setting.value)
+            if key == "projection_income_sources":
+                income_sources = [IncomeSource(**s) for s in val]
+            elif key == "projection_monthly_contribution":
+                contribution_override = val
+            elif key == "projection_return_rates":
+                return_rates.update(val)
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            log.warning("Malformed setting %s: %s", key, e)
+
+    return is_configured, income_sources, contribution_override, return_rates
+
+
+async def _detect_monthly_income(
+    db: AsyncSession,
+) -> tuple[int, list[IncomeSource]]:
+    """Auto-detect monthly income from recurring patterns or 3-month average."""
+    recurring = await detect_recurring(db, lookback_months=6, direction="income")
+    if recurring:
+        sources: list[IncomeSource] = []
+        for p in recurring:
+            multiplier = _FREQUENCY_TO_MONTHLY.get(p.frequency)
+            if multiplier is None:
+                continue
+            monthly_amt = int(p.median_amount * multiplier)
+            sources.append(
+                IncomeSource(name=p.raw_description, monthly_amount=monthly_amt)
+            )
+        return sum(s.monthly_amount for s in sources), sources
+
+    # Fallback: 3-month average
+    avg = await _avg_monthly_amount(db, positive=True, months=3)
+    return avg, []
+
+
 @router.get("/income-projection", response_model=IncomeProjectionResponse)
 async def income_projection(
     time_horizon_years: int = Query(default=30, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> IncomeProjectionResponse:
-    """Compute income projection with investment growth bands.
+    """Compute income projection with investment growth bands."""
+    (
+        is_configured,
+        income_sources,
+        contribution_override,
+        return_rates,
+    ) = await _load_projection_settings(db)
 
-    Uses configured income sources if available, otherwise auto-detects
-    recurring income and expenses from transaction history.
-    """
-    is_configured = False
-    income_sources: list[IncomeSource] = []
-    monthly_contribution_override: int | None = None
-    return_rates = dict(_DEFAULT_RETURNS)
-
-    # Check for user configuration
-    for key_name in (
-        "projection_income_sources",
-        "projection_monthly_contribution",
-        "projection_return_rates",
-    ):
-        setting = await db.get(UserSetting, key_name)
-        if setting:
-            is_configured = True
-            try:
-                val = json.loads(setting.value)
-                if key_name == "projection_income_sources":
-                    income_sources = [IncomeSource(**s) for s in val]
-                elif key_name == "projection_monthly_contribution":
-                    monthly_contribution_override = val
-                elif key_name == "projection_return_rates":
-                    return_rates.update(val)
-            except (json.JSONDecodeError, TypeError, KeyError) as e:
-                log.warning("Malformed setting %s: %s", key_name, e)
-
-    # Auto-calculate income and expenses
+    # Determine monthly income
     if income_sources:
         monthly_income = sum(s.monthly_amount for s in income_sources)
     else:
-        # Try recurring income detection first
-        recurring_income = await detect_recurring(
-            db, lookback_months=6, direction="income"
-        )
-        if recurring_income:
-            monthly_income = 0
-            for p in recurring_income:
-                if p.frequency == "monthly":
-                    monthly_amt = p.median_amount
-                elif p.frequency == "biweekly":
-                    monthly_amt = int(p.median_amount * 26 / 12)
-                elif p.frequency == "weekly":
-                    monthly_amt = int(p.median_amount * 52 / 12)
-                else:
-                    continue
-                monthly_income += monthly_amt
-                income_sources.append(
-                    IncomeSource(name=p.raw_description, monthly_amount=monthly_amt)
-                )
-        else:
-            # Fallback: average positive amounts over last 3 months
-            now = int(time.time())
-            three_months_ago = now - (90 * 24 * 60 * 60)
-            income_query = (
-                select(func.sum(Transaction.amount))
-                .where(Transaction.amount > 0)
-                .where(Transaction.posted_at >= three_months_ago)
-            )
-            income_query = exclude_disabled_accounts(income_query)
-            result = await db.execute(income_query)
-            total_income = result.scalar() or 0
-            monthly_income = total_income // 3
+        monthly_income, income_sources = await _detect_monthly_income(db)
 
-    # Calculate expenses
-    now = int(time.time())
-    three_months_ago = now - (90 * 24 * 60 * 60)
-    expense_query = (
-        select(func.sum(Transaction.amount))
-        .where(Transaction.amount < 0)
-        .where(Transaction.posted_at >= three_months_ago)
-    )
-    expense_query = exclude_disabled_accounts(expense_query)
-    result = await db.execute(expense_query)
-    total_expenses = abs(result.scalar() or 0)
-    monthly_expenses = total_expenses // 3
+    # Determine monthly expenses (3-month average)
+    monthly_expenses = await _avg_monthly_amount(db, positive=False, months=3)
 
     # Monthly contribution
-    if monthly_contribution_override is not None:
-        monthly_contribution = monthly_contribution_override
-    else:
-        monthly_contribution = max(0, monthly_income - monthly_expenses)
+    monthly_contribution = (
+        contribution_override
+        if contribution_override is not None
+        else max(0, monthly_income - monthly_expenses)
+    )
 
-    # Compute projection bands
     bands = _compute_projection(monthly_contribution, time_horizon_years, return_rates)
 
     return IncomeProjectionResponse(

@@ -60,7 +60,7 @@ async def update_category(
 async def delete_category(
     category_id: int,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     """Delete a custom category. Default categories cannot be deleted.
 
     Transactions with this category will have their category set to NULL.

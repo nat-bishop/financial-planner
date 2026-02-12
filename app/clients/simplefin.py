@@ -14,6 +14,7 @@ import json
 import time
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -43,7 +44,7 @@ class SFTransaction:
     description: str
     pending: bool
     transacted_at: int | None  # Unix timestamp (optional)
-    extra: dict | None  # Provider-specific data (optional)
+    extra: dict[str, Any] | None  # Provider-specific data (optional)
 
 
 @dataclass

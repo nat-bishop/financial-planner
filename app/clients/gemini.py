@@ -69,6 +69,8 @@ class GeminiClient:
                 ),
             )
             try:
+                if response.text is None:
+                    raise RuntimeError("Gemini returned empty response")
                 return response_model.model_validate_json(response.text)
             except ValidationError as e:
                 last_error = e

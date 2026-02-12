@@ -7,6 +7,7 @@ Providers produce them; the sync service upserts them into the DB.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -34,7 +35,7 @@ class ProviderTransaction:
     description: str
     pending: bool
     transacted_at: int | None = None
-    extra: dict | None = None
+    extra: dict[str, Any] | None = None
 
 
 @dataclass
@@ -45,4 +46,6 @@ class SyncResult:
     transactions: list[ProviderTransaction]
     errors: list[str] = field(default_factory=list)
     raw_json: str = ""
-    session_data: dict | None = None  # Browser providers return updated session
+    session_data: dict[str, Any] | None = (
+        None  # Browser providers return updated session
+    )

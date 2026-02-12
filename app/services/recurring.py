@@ -3,6 +3,7 @@
 import statistics
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy import select
@@ -15,66 +16,50 @@ from app.models import (
     normalize_description,
 )
 
+# Maps (min_days, max_days) ranges to frequency names
+_FREQUENCY_RANGES: list[tuple[int, int, str]] = [
+    (6, 8, "weekly"),
+    (13, 16, "biweekly"),
+    (27, 33, "monthly"),
+    (55, 65, "bimonthly"),
+    (85, 95, "quarterly"),
+    (170, 195, "semiannual"),
+    (350, 380, "annual"),
+]
+
+_MAX_STD_DEV: dict[str, float] = {
+    "weekly": 2,
+    "biweekly": 3,
+    "monthly": 5,
+    "bimonthly": 7,
+    "quarterly": 10,
+    "semiannual": 15,
+    "annual": 20,
+}
+
 
 def _classify_frequency(median_days: float) -> str | None:
     """Classify a median interval (in days) into a named frequency."""
-    if 6 <= median_days <= 8:
-        return "weekly"
-    if 13 <= median_days <= 16:
-        return "biweekly"
-    if 27 <= median_days <= 33:
-        return "monthly"
-    if 55 <= median_days <= 65:
-        return "bimonthly"
-    if 85 <= median_days <= 95:
-        return "quarterly"
-    if 170 <= median_days <= 195:
-        return "semiannual"
-    if 350 <= median_days <= 380:
-        return "annual"
+    for lo, hi, name in _FREQUENCY_RANGES:
+        if lo <= median_days <= hi:
+            return name
     return None
 
 
-def _max_std_dev(frequency: str) -> float:
-    """Maximum allowed standard deviation (days) for a frequency to be considered regular."""
-    return {
-        "weekly": 2,
-        "biweekly": 3,
-        "monthly": 5,
-        "bimonthly": 7,
-        "quarterly": 10,
-        "semiannual": 15,
-        "annual": 20,
-    }.get(frequency, 5)
-
-
+@dataclass
 class RecurringPattern:
     """Detected recurring transaction pattern."""
 
-    def __init__(
-        self,
-        *,
-        description: str,
-        raw_description: str,
-        account_id: str,
-        account_name: str,
-        frequency: str,
-        median_amount: int,
-        last_occurrence: int,
-        predicted_next: int,
-        occurrence_count: int,
-        confidence: float,
-    ):
-        self.description = description
-        self.raw_description = raw_description
-        self.account_id = account_id
-        self.account_name = account_name
-        self.frequency = frequency
-        self.median_amount = median_amount
-        self.last_occurrence = last_occurrence
-        self.predicted_next = predicted_next
-        self.occurrence_count = occurrence_count
-        self.confidence = confidence
+    description: str
+    raw_description: str
+    account_id: str
+    account_name: str
+    frequency: str
+    median_amount: int
+    last_occurrence: int
+    predicted_next: int
+    occurrence_count: int
+    confidence: float
 
 
 async def detect_recurring(
@@ -145,7 +130,7 @@ async def detect_recurring(
         else:
             std_dev = 0.0
 
-        if std_dev > _max_std_dev(frequency):
+        if std_dev > _MAX_STD_DEV.get(frequency, 5):
             continue
 
         # Compute confidence

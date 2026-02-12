@@ -25,7 +25,8 @@ repos:
     hooks:
       - id: basedpyright
         name: basedpyright
-        entry: bash -c 'output=$(uv run basedpyright 2>&1); code=$?; echo "$output" | grep -E "error:|^[0-9]+ error"; exit $code'
-        language: system
+        entry: basedpyright
+        language: node
         types: [python]
         pass_filenames: false
+        additional_dependencies: ['basedpyright@1.38.0']

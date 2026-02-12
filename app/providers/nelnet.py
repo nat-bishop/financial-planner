@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.providers.base import AuthenticationError, ProviderError, TwoFAHandler
 from app.providers.browser import BrowserProvider
@@ -64,7 +64,7 @@ class NelnetProvider(BrowserProvider):
     display_name = "Nelnet Student Loans"
     max_syncs_per_day = 4
 
-    async def validate_credentials(self, raw_input: dict) -> dict:
+    async def validate_credentials(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         username = raw_input.get("username", "").strip()
         password = raw_input.get("password", "")
         if not username or not password:
@@ -76,9 +76,9 @@ class NelnetProvider(BrowserProvider):
 
     async def sync(
         self,
-        credential_data: dict,
+        credential_data: dict[str, Any],
         cursor: str | None,
-        session_data: dict | None = None,
+        session_data: dict[str, Any] | None = None,
         two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         try:
@@ -101,9 +101,9 @@ class NelnetProvider(BrowserProvider):
 
     async def _do_sync(
         self,
-        credential_data: dict,
+        credential_data: dict[str, Any],
         cursor: str | None,
-        session_data: dict | None = None,
+        session_data: dict[str, Any] | None = None,
         two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         async with self._browser_session(session_data) as (page, context):
@@ -134,7 +134,7 @@ class NelnetProvider(BrowserProvider):
             raw_accounts = await self._scrape_accounts(page)
             raw_payments = await self._scrape_payments(page)
 
-            session = await context.storage_state()
+            session: dict[str, Any] = await context.storage_state()  # pyright: ignore[reportAssignmentType]
 
             return SyncResult(
                 accounts=_to_provider_accounts(raw_accounts),
@@ -168,7 +168,10 @@ class NelnetProvider(BrowserProvider):
             await close_btn.click(timeout=3000)
 
     async def _login(
-        self, page: Page, creds: dict, two_fa_handler: TwoFAHandler | None = None
+        self,
+        page: Page,
+        creds: dict[str, Any],
+        two_fa_handler: TwoFAHandler | None = None,
     ) -> None:
         """Nelnet login flow with exact selectors (verified 2026-02-11).
 

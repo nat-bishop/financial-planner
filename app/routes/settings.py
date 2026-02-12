@@ -59,7 +59,7 @@ async def put_setting(
 async def delete_setting(
     key: str,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     """Delete a user setting."""
     setting = await db.get(UserSetting, key)
     if not setting:

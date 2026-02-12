@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import sys
 import time
+from abc import ABC
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import settings
 from app.providers.base import FinanceProvider, ProviderError
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class BrowserProvider(FinanceProvider):
+class BrowserProvider(FinanceProvider, ABC):
     """Base class for browser-based providers.
 
     Subclasses implement validate_credentials() and sync().
@@ -35,15 +37,14 @@ class BrowserProvider(FinanceProvider):
     @asynccontextmanager
     async def _browser_session(
         self,
-        session_data: dict | None = None,
-        headless: bool | str | None = None,
+        session_data: dict[str, Any] | None = None,
+        headless: bool | None = None,
     ) -> AsyncGenerator[tuple[Page, BrowserContext], None]:
         """Launch Playwright browser with stealth, optionally restoring session.
 
         Args:
             session_data: Playwright storageState dict to restore.
             headless: Override headless mode. Default: settings.browser_headless.
-                      Accepts True/False or "new" for Playwright's new headless mode.
 
         Yields:
             (page, context) tuple.
@@ -58,15 +59,11 @@ class BrowserProvider(FinanceProvider):
             ) from None
 
         if headless is None:
-            raw = settings.browser_headless
-            if raw == "new":
-                headless = "new"
-            else:
-                headless = raw.lower() not in ("false", "0", "no")
+            headless = settings.browser_headless
 
         pw = await async_playwright().start()
         try:
-            launch_args: dict = {
+            launch_args: dict[str, Any] = {
                 "headless": headless,
                 "args": ["--disable-blink-features=AutomationControlled"],
             }
@@ -74,12 +71,27 @@ class BrowserProvider(FinanceProvider):
                 launch_args["channel"] = settings.browser_channel
             browser = await pw.chromium.launch(**launch_args)
             try:
-                ctx_args: dict = {
+                ctx_args: dict[str, Any] = {
                     "viewport": {
                         "width": settings.browser_viewport_width,
                         "height": settings.browser_viewport_height,
                     },
                 }
+                # Spoof Windows platform on Linux to bypass Akamai bot detection.
+                # Docker Linux Chrome sends "X11; Linux x86_64" in UA and
+                # "Linux" in Sec-CH-UA-Platform, which Akamai flags as automated.
+                if sys.platform == "linux":
+                    ver = browser.version
+                    ctx_args["user_agent"] = (
+                        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        f"AppleWebKit/537.36 (KHTML, like Gecko) "
+                        f"Chrome/{ver} Safari/537.36"
+                    )
+                    ctx_args["extra_http_headers"] = {
+                        "Sec-CH-UA-Platform": '"Windows"',
+                    }
+                    ctx_args["locale"] = "en-US"
+                    ctx_args["timezone_id"] = "America/Chicago"
                 if session_data:
                     ctx_args["storage_state"] = session_data
                 context = await browser.new_context(**ctx_args)
@@ -131,12 +143,12 @@ class BrowserProvider(FinanceProvider):
                 ),
             )
 
-    async def _capture_debug_snapshot(self, page: Page, context: str) -> dict:
+    async def _capture_debug_snapshot(self, page: Page, context: str) -> dict[str, Any]:
         """Capture page diagnostics for debugging scrape failures.
 
         Saves a screenshot to data/debug/ and returns URL, title, and content snippet.
         """
-        debug_info: dict = {"url": page.url}
+        debug_info: dict[str, Any] = {"url": page.url}
         try:
             debug_info["title"] = await page.title()
         except Exception:

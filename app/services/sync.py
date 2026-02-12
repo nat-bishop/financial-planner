@@ -37,7 +37,7 @@ from app.services.two_fa import (
 log = logging.getLogger(__name__)
 
 _sync_locks: dict[str, asyncio.Lock] = {}
-_background_tasks: dict[int, asyncio.Task] = {}
+_background_tasks: dict[int, asyncio.Task[None]] = {}
 _ONE_DAY = 86400
 
 

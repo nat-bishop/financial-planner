@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from app.clients.simplefin import SimpleFINClient
 from app.providers.base import (
@@ -19,7 +20,7 @@ class SimpleFINProvider(FinanceProvider):
     display_name = "SimpleFIN Bridge"
     max_syncs_per_day = 24
 
-    async def validate_credentials(self, raw_input: dict) -> dict:
+    async def validate_credentials(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         setup_token = raw_input.get("setup_token", "")
         if not setup_token:
             raise ProviderError("Missing setup_token", self.provider_name)
@@ -40,9 +41,9 @@ class SimpleFINProvider(FinanceProvider):
 
     async def sync(
         self,
-        credential_data: dict,
+        credential_data: dict[str, Any],
         cursor: str | None,
-        session_data: dict | None = None,
+        session_data: dict[str, Any] | None = None,
         two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         access_url = credential_data["access_url"]

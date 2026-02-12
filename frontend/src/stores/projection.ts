@@ -3,6 +3,12 @@ import { ref } from 'vue'
 import { useApi } from '../composables/useApi'
 import type { IncomeProjectionResponse } from '../types'
 
+const SETTING_KEYS = [
+  'projection_income_sources',
+  'projection_monthly_contribution',
+  'projection_return_rates',
+] as const
+
 export const useProjectionStore = defineStore('projection', () => {
   const projection = ref<IncomeProjectionResponse | null>(null)
   const loading = ref(false)
@@ -23,42 +29,29 @@ export const useProjectionStore = defineStore('projection', () => {
     }
   }
 
-  async function saveIncomeSources(sources: { name: string; monthly_amount: number }[]) {
+  async function saveSetting(key: string, value: unknown) {
     const api = useApi()
     try {
-      await api.put('/settings/projection_income_sources', { value: sources })
+      await api.put(`/settings/${key}`, { value })
       await fetch()
     } catch (e: any) {
       error.value = e.message
     }
   }
 
-  async function saveContribution(amount: number) {
-    const api = useApi()
-    try {
-      await api.put('/settings/projection_monthly_contribution', { value: amount })
-      await fetch()
-    } catch (e: any) {
-      error.value = e.message
-    }
-  }
+  const saveIncomeSources = (sources: { name: string; monthly_amount: number }[]) =>
+    saveSetting('projection_income_sources', sources)
 
-  async function saveReturnRates(rates: { low: number; average: number; high: number }) {
-    const api = useApi()
-    try {
-      await api.put('/settings/projection_return_rates', { value: rates })
-      await fetch()
-    } catch (e: any) {
-      error.value = e.message
-    }
-  }
+  const saveContribution = (amount: number) =>
+    saveSetting('projection_monthly_contribution', amount)
+
+  const saveReturnRates = (rates: { low: number; average: number; high: number }) =>
+    saveSetting('projection_return_rates', rates)
 
   async function clearConfig() {
     const api = useApi()
     try {
-      await api.del('/settings/projection_income_sources').catch(() => {})
-      await api.del('/settings/projection_monthly_contribution').catch(() => {})
-      await api.del('/settings/projection_return_rates').catch(() => {})
+      await Promise.all(SETTING_KEYS.map(k => api.del(`/settings/${k}`).catch(() => {})))
       await fetch()
     } catch (e: any) {
       error.value = e.message

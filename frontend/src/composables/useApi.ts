@@ -12,21 +12,11 @@ export function useApi() {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function get<T>(path: string, params?: Record<string, any>): Promise<T> {
+  async function _request<T>(url: string, init?: RequestInit): Promise<T> {
     loading.value = true
     error.value = null
-
-    const url = new URL(BASE + path, window.location.origin)
-    if (params) {
-      for (const [key, val] of Object.entries(params)) {
-        if (val !== undefined && val !== null && val !== '') {
-          url.searchParams.set(key, String(val))
-        }
-      }
-    }
-
     try {
-      const res = await fetch(url.toString())
+      const res = await fetch(url, init)
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(parseDetail(body.detail, res.status))
@@ -40,93 +30,30 @@ export function useApi() {
     }
   }
 
-  async function post<T>(path: string, body?: any): Promise<T> {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(BASE + path, {
-        method: 'POST',
-        headers: body ? { 'Content-Type': 'application/json' } : {},
-        body: body ? JSON.stringify(body) : undefined,
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(parseDetail(data.detail, res.status))
-      }
-      return await res.json() as T
-    } catch (e: any) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
+  function _jsonInit(method: string, body?: any): RequestInit {
+    return {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     }
   }
 
-  async function put<T>(path: string, body: any): Promise<T> {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(BASE + path, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(parseDetail(data.detail, res.status))
+  function get<T>(path: string, params?: Record<string, any>): Promise<T> {
+    const url = new URL(BASE + path, window.location.origin)
+    if (params) {
+      for (const [key, val] of Object.entries(params)) {
+        if (val !== undefined && val !== null && val !== '') {
+          url.searchParams.set(key, String(val))
+        }
       }
-      return await res.json() as T
-    } catch (e: any) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
     }
+    return _request<T>(url.toString())
   }
 
-  async function patch<T>(path: string, body: any): Promise<T> {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(BASE + path, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(parseDetail(data.detail, res.status))
-      }
-      return await res.json() as T
-    } catch (e: any) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function del<T>(path: string): Promise<T> {
-    loading.value = true
-    error.value = null
-
-    try {
-      const res = await fetch(BASE + path, { method: 'DELETE' })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(parseDetail(data.detail, res.status))
-      }
-      return await res.json() as T
-    } catch (e: any) {
-      error.value = e.message
-      throw e
-    } finally {
-      loading.value = false
-    }
-  }
+  const post = <T>(path: string, body?: any) => _request<T>(BASE + path, _jsonInit('POST', body))
+  const put = <T>(path: string, body: any) => _request<T>(BASE + path, _jsonInit('PUT', body))
+  const patch = <T>(path: string, body: any) => _request<T>(BASE + path, _jsonInit('PATCH', body))
+  const del = <T>(path: string) => _request<T>(BASE + path, { method: 'DELETE' })
 
   return { loading, error, get, post, put, patch, del }
 }

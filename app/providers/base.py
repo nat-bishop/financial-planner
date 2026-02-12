@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.providers.models import SyncResult
@@ -24,7 +24,7 @@ class ProviderError(Exception):
         self,
         message: str,
         provider: str,
-        detail: dict | None = None,
+        detail: dict[str, Any] | None = None,
     ) -> None:
         self.provider = provider
         self.detail = detail or {}
@@ -51,7 +51,7 @@ class FinanceProvider(ABC):
     max_syncs_per_day: int
 
     @abstractmethod
-    async def validate_credentials(self, raw_input: dict) -> dict:
+    async def validate_credentials(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Transform user input into storable credential data.
 
         SimpleFIN: {setup_token} -> {access_url}
@@ -65,9 +65,9 @@ class FinanceProvider(ABC):
     @abstractmethod
     async def sync(
         self,
-        credential_data: dict,
+        credential_data: dict[str, Any],
         cursor: str | None,
-        session_data: dict | None = None,
+        session_data: dict[str, Any] | None = None,
         two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         """Fetch accounts and transactions from the provider.

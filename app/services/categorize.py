@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
@@ -34,7 +35,7 @@ log = logging.getLogger(__name__)
 UNABLE_TO_CATEGORIZE = "Unable to Categorize"
 
 
-def _prepare_transactions(transactions: list[Transaction]) -> list[dict]:
+def _prepare_transactions(transactions: list[Transaction]) -> list[dict[str, Any]]:
     """Convert Transaction ORM objects to dicts for the prompt template."""
     items = []
     for tx in transactions:
@@ -129,7 +130,7 @@ async def cache_llm_results(
 async def _fetch_memory_context(
     db: AsyncSession,
     account_ids: list[str],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Fetch category memory entries for prompt context (few-shot examples).
 
     Returns up to 50 most recently updated entries for the given accounts.
