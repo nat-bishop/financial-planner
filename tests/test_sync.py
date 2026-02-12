@@ -151,7 +151,9 @@ def _make_mock_provider(sync_result: SyncResult, provider_name: str = "simplefin
 
     mock_provider = AsyncMock(spec=FinanceProvider)
     mock_provider.provider_name = provider_name
-    mock_provider.display_name = "SimpleFIN Bridge" if provider_name == "simplefin" else provider_name
+    mock_provider.display_name = (
+        "SimpleFIN Bridge" if provider_name == "simplefin" else provider_name
+    )
     mock_provider.max_syncs_per_day = 24
     mock_provider.sync = AsyncMock(return_value=sync_result)
     return mock_provider
@@ -170,7 +172,6 @@ async def _do_sync(db, mock_provider, provider_name: str = "simplefin"):
 
     with patch("app.services.sync.get_provider", return_value=mock_provider):
         return await _run_sync(db, mock_provider, sync_log)
-
 
 
 def _fixture_to_sync_result(fixture: dict) -> SyncResult:
@@ -220,10 +221,12 @@ def _fixture_to_sync_result(fixture: dict) -> SyncResult:
         accounts=accounts,
         transactions=transactions,
         errors=fixture.get("errors", []),
-        raw_json=json.dumps({
-            "accounts_count": len(accounts),
-            "errors": fixture.get("errors", []),
-        }),
+        raw_json=json.dumps(
+            {
+                "accounts_count": len(accounts),
+                "errors": fixture.get("errors", []),
+            }
+        ),
     )
 
 
@@ -236,9 +239,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -280,9 +287,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -315,9 +326,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -339,9 +354,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -361,9 +380,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -418,9 +441,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -445,12 +472,14 @@ class TestSyncProvider:
         """Sync rejects if daily limit is reached."""
         now = int(time.time())
         for i in range(24):
-            db.add(SyncLog(
-                provider="simplefin",
-                started_at=now - (i * 100),
-                completed_at=now - (i * 100),
-                status="success",
-            ))
+            db.add(
+                SyncLog(
+                    provider="simplefin",
+                    started_at=now - (i * 100),
+                    completed_at=now - (i * 100),
+                    status="success",
+                )
+            )
         await db.flush()
 
         mock_provider = _make_mock_provider(SyncResult(accounts=[], transactions=[]))
@@ -464,9 +493,13 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -485,10 +518,14 @@ class TestSyncProvider:
         cred = Credential(
             id="cred_1",
             provider="nelnet",
-            encrypted_data=encrypt(json.dumps({
-                "username": "user",
-                "password": "pass",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "username": "user",
+                        "password": "pass",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -521,9 +558,13 @@ class TestSyncAll:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.flush()
@@ -628,8 +669,10 @@ def _fixture_to_sfin_response(fixture: dict) -> SFSyncResponse:
         accounts=accounts,
         transactions=transactions,
         errors=fixture.get("errors", []),
-        raw_json=json.dumps({
-            "accounts_count": len(accounts),
-            "errors": fixture.get("errors", []),
-        }),
+        raw_json=json.dumps(
+            {
+                "accounts_count": len(accounts),
+                "errors": fixture.get("errors", []),
+            }
+        ),
     )

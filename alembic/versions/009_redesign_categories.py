@@ -10,6 +10,7 @@ import time
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "009"
@@ -23,10 +24,26 @@ NEW_CATEGORIES = [
     ("Housing", "Rent, mortgage, property tax, HOA, renters insurance", False),
     ("Utilities", "Electric, water, gas, internet, phone, trash", False),
     ("Groceries", "Supermarkets, specialty food markets, online grocery", False),
-    ("Dining & Drinks", "Restaurants, coffee, bars, fast food, takeout, delivery, bakeries", False),
-    ("Transportation", "Gas, rideshare, public transit, parking, car maintenance, auto insurance", False),
-    ("Shopping", "Clothing, electronics, household, online retail, pets, general retail", False),
-    ("Health & Medical", "Doctor, dentist, pharmacy, health insurance, gym, personal care", False),
+    (
+        "Dining & Drinks",
+        "Restaurants, coffee, bars, fast food, takeout, delivery, bakeries",
+        False,
+    ),
+    (
+        "Transportation",
+        "Gas, rideshare, public transit, parking, car maintenance, auto insurance",
+        False,
+    ),
+    (
+        "Shopping",
+        "Clothing, electronics, household, online retail, pets, general retail",
+        False,
+    ),
+    (
+        "Health & Medical",
+        "Doctor, dentist, pharmacy, health insurance, gym, personal care",
+        False,
+    ),
     ("Entertainment", "Movies, concerts, events, sports, streaming, hobbies", False),
     ("Education", "Student loans, tuition, books, courses", False),
     ("Travel", "Flights, hotels, vacation expenses", False),
@@ -41,7 +58,10 @@ OLD_CATEGORIES = [
     ("Housing", "Rent, mortgage, property tax, HOA fees"),
     ("Utilities", "Electric, gas, water, sewer, trash, internet, phone"),
     ("Food & Dining", "Groceries, restaurants, takeout, coffee shops, bars"),
-    ("Transportation", "Gas, parking, tolls, public transit, rideshare, car maintenance"),
+    (
+        "Transportation",
+        "Gas, parking, tolls, public transit, rideshare, car maintenance",
+    ),
     ("Shopping", "Clothing, electronics, household items, general retail"),
     ("Health & Medical", "Doctor, dentist, pharmacy, insurance premiums, gym"),
     ("Entertainment", "Streaming, movies, concerts, games, hobbies"),
@@ -60,7 +80,9 @@ def upgrade() -> None:
     # Add exclude_from_totals to categories
     op.add_column(
         "categories",
-        sa.Column("exclude_from_totals", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column(
+            "exclude_from_totals", sa.Boolean(), nullable=False, server_default="0"
+        ),
     )
 
     # Drop subcategory columns

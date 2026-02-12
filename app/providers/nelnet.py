@@ -82,7 +82,9 @@ class NelnetProvider(BrowserProvider):
         two_fa_handler: TwoFAHandler | None = None,
     ) -> SyncResult:
         try:
-            return await self._do_sync(credential_data, cursor, session_data, two_fa_handler)
+            return await self._do_sync(
+                credential_data, cursor, session_data, two_fa_handler
+            )
         except ProviderError:
             raise
         except Exception as e:
@@ -107,12 +109,18 @@ class NelnetProvider(BrowserProvider):
         async with self._browser_session(session_data) as (page, context):
             # Navigate to dashboard — if session is valid, we stay there.
             # If not, the site redirects us to the login page.
-            await page.goto(f"{NELNET_BASE_URL}/dashboard", wait_until="load")
+            resp = await page.goto(f"{NELNET_BASE_URL}/dashboard", wait_until="load")
             with contextlib.suppress(Exception):
                 await page.wait_for_load_state("networkidle", timeout=15_000)
             await self._random_delay(1000, 2000)
 
-            if self._needs_login(page):
+            # Detect Akamai 403 (bot block) — treat as needing fresh login
+            status = resp.status if resp else 0
+            if status == 403:
+                log.warning("Got 403 on /dashboard — Akamai bot detection triggered")
+                await self._capture_debug_snapshot(page, "dashboard_403")
+
+            if self._needs_login(page) or status == 403:
                 log.info("Session expired or first login, authenticating")
                 await page.goto(NELNET_LOGIN_URL, wait_until="load")
                 await self._random_delay(1000, 2000)
@@ -183,7 +191,9 @@ class NelnetProvider(BrowserProvider):
                 const el = document.getElementById('transcend-consent-manager');
                 if (el) el.remove();
             }""")
-            accept_btn = page.get_by_role("button", name="accept federal usage disclaimer")
+            accept_btn = page.get_by_role(
+                "button", name="accept federal usage disclaimer"
+            )
             await accept_btn.wait_for(timeout=15_000)
             await accept_btn.click()
 
@@ -253,7 +263,9 @@ class NelnetProvider(BrowserProvider):
         # Now on /MFA/Verify — read the prompt text
         prompt_text = "Enter the verification code sent to your email"
         with contextlib.suppress(Exception):
-            prompt_el = page.locator("p").filter(has_text="We've sent a one-time use code to")
+            prompt_el = page.locator("p").filter(
+                has_text="We've sent a one-time use code to"
+            )
             text = await prompt_el.inner_text(timeout=5000)
             if text:
                 prompt_text = text.strip()
@@ -275,15 +287,15 @@ class NelnetProvider(BrowserProvider):
             code = await two_fa_handler(challenge)
 
             await page.get_by_role("textbox", name="Authentication Code").fill(code)
-            await page.get_by_role("checkbox", name="Remember this device for 90 days.").check()
+            await page.get_by_role(
+                "checkbox", name="Remember this device for 90 days."
+            ).check()
             await self._random_delay(300, 600)
             await page.get_by_role("button", name="Verify").click()
 
             # Wait for redirect chain: /MFA/Verify → auth callback → main site
             try:
-                await page.wait_for_url(
-                    f"**{NELNET_BASE_URL}/**", timeout=30_000
-                )
+                await page.wait_for_url(f"**{NELNET_BASE_URL}/**", timeout=30_000)
                 # Let the redirect chain settle (callback → dashboard)
                 await page.wait_for_load_state("networkidle", timeout=15_000)
                 log.info("2FA verification successful, redirected to %s", page.url)
@@ -293,7 +305,11 @@ class NelnetProvider(BrowserProvider):
 
             # If still on MFA page, code was likely rejected
             if "/MFA/" in page.url:
-                log.warning("2FA code rejected (attempt %d/%d)", attempt + 1, TWO_FA_MAX_ATTEMPTS)
+                log.warning(
+                    "2FA code rejected (attempt %d/%d)",
+                    attempt + 1,
+                    TWO_FA_MAX_ATTEMPTS,
+                )
                 continue
 
             # Left MFA but redirect didn't fully complete — give more time
@@ -339,8 +355,12 @@ class NelnetProvider(BrowserProvider):
                 # Extract key-value pairs from the section
                 loan_type = await self._extract_field(section, "Loan Type:")
                 status = await self._extract_field(section, "Status:")
-                outstanding_balance = await self._extract_field(section, "Outstanding Balance:")
-                interest_rate = await self._extract_field(section, "Effective Interest Rate:")
+                outstanding_balance = await self._extract_field(
+                    section, "Outstanding Balance:"
+                )
+                interest_rate = await self._extract_field(
+                    section, "Effective Interest Rate:"
+                )
 
                 if not loan_type or not status:
                     continue
@@ -349,13 +369,15 @@ class NelnetProvider(BrowserProvider):
                 if status == "Paid In Full":
                     continue
 
-                accounts.append(NelnetAccountData(
-                    group_name=group_name,
-                    loan_type=loan_type,
-                    status=status,
-                    outstanding_balance=outstanding_balance or "$0.00",
-                    interest_rate=interest_rate,
-                ))
+                accounts.append(
+                    NelnetAccountData(
+                        group_name=group_name,
+                        loan_type=loan_type,
+                        status=status,
+                        outstanding_balance=outstanding_balance or "$0.00",
+                        interest_rate=interest_rate,
+                    )
+                )
 
         except ProviderError:
             raise
@@ -364,7 +386,11 @@ class NelnetProvider(BrowserProvider):
             raise ProviderError(
                 f"Failed to scrape accounts: {e}",
                 self.provider_name,
-                detail={"type": "scrape_error", "page": "loan-details", "debug": debug_info},
+                detail={
+                    "type": "scrape_error",
+                    "page": "loan-details",
+                    "debug": debug_info,
+                },
             ) from e
 
         return accounts
@@ -426,7 +452,11 @@ class NelnetProvider(BrowserProvider):
             raise ProviderError(
                 f"Failed to scrape payments: {e}",
                 self.provider_name,
-                detail={"type": "scrape_error", "page": "payment-activity", "debug": debug_info},
+                detail={
+                    "type": "scrape_error",
+                    "page": "payment-activity",
+                    "debug": debug_info,
+                },
             ) from e
 
         return payments
@@ -452,13 +482,15 @@ class NelnetProvider(BrowserProvider):
             # Clean up: remove "Posted" prefix that comes from the status icon alt text
             type_text = re.sub(r"^Posted\s*", "", type_text).strip()
 
-            payments.append(NelnetPaymentData(
-                date=date_text,
-                amount=amount_text,
-                principal=principal_text,
-                interest=interest_text,
-                payment_type=type_text or "Payment",
-            ))
+            payments.append(
+                NelnetPaymentData(
+                    date=date_text,
+                    amount=amount_text,
+                    principal=principal_text,
+                    interest=interest_text,
+                    payment_type=type_text or "Payment",
+                )
+            )
 
         return payments
 
@@ -533,18 +565,20 @@ def _to_provider_transactions(
         tx_date = _parse_date(p.date)
         tx_id = _stable_id("nelnet", "payment", p.date, p.amount, p.payment_type)
 
-        result.append(ProviderTransaction(
-            id=tx_id,
-            account_id=default_account_id,
-            amount=amount,
-            date=tx_date,
-            description=f"Nelnet {p.payment_type} Payment",
-            pending=False,
-            extra={
-                "principal": p.principal,
-                "interest": p.interest,
-                "payment_type": p.payment_type,
-            },
-        ))
+        result.append(
+            ProviderTransaction(
+                id=tx_id,
+                account_id=default_account_id,
+                amount=amount,
+                date=tx_date,
+                description=f"Nelnet {p.payment_type} Payment",
+                pending=False,
+                extra={
+                    "principal": p.principal,
+                    "interest": p.interest,
+                    "payment_type": p.payment_type,
+                },
+            )
+        )
 
     return result

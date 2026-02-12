@@ -65,7 +65,9 @@ async def list_transactions(
     """List transactions with optional filters, sorting, and aggregates."""
     # Data query
     data_query = select(Transaction)
-    data_query = _build_filters(data_query, account_id, category, search, start_date, end_date)
+    data_query = _build_filters(
+        data_query, account_id, category, search, start_date, end_date
+    )
 
     # Sorting
     sort_map = {
@@ -97,7 +99,9 @@ async def list_transactions(
             func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)), 0
         ).label("total_expenses"),
     )
-    agg_query = _build_filters(agg_query, account_id, category, search, start_date, end_date)
+    agg_query = _build_filters(
+        agg_query, account_id, category, search, start_date, end_date
+    )
 
     # Execute both
     result = await db.scalars(data_query)

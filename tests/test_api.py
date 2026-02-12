@@ -59,7 +59,6 @@ class TestHealthEndpoint:
         assert simplefin["connected"] is False
         assert simplefin["display_name"] == "SimpleFIN Bridge"
 
-
     @pytest.mark.asyncio
     async def test_health_includes_warnings_field(self, client):
         """Health endpoint includes warnings list."""
@@ -125,11 +124,13 @@ class TestAccountsEndpoint:
     async def test_list_accounts_pagination(self, client, db):
         """List accounts supports limit and offset."""
         for i in range(5):
-            db.add(Account(
-                id=f"act_{i}",
-                provider="simplefin",
-                name=f"Account {i}",
-            ))
+            db.add(
+                Account(
+                    id=f"act_{i}",
+                    provider="simplefin",
+                    name=f"Account {i}",
+                )
+            )
         await db.commit()
 
         # Default returns all
@@ -148,7 +149,9 @@ class TestAccountsEndpoint:
     async def test_list_accounts_excludes_disabled(self, client, db):
         """Disabled accounts are excluded from list by default."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))
-        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         await db.commit()
 
         response = await client.get("/accounts/")
@@ -160,7 +163,9 @@ class TestAccountsEndpoint:
     async def test_list_accounts_include_disabled(self, client, db):
         """include_disabled=true returns all accounts including disabled."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))
-        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         await db.commit()
 
         response = await client.get("/accounts/", params={"include_disabled": "true"})
@@ -240,20 +245,31 @@ class TestTransactionsEndpoint:
         db.add(account)
 
         now = int(time.time())
-        db.add_all([
-            Transaction(
-                account_id="act_1", external_id="tx_1",
-                posted_at=now, amount=-5000, description="Starbucks Coffee",
-            ),
-            Transaction(
-                account_id="act_1", external_id="tx_2",
-                posted_at=now, amount=-10000, description="Amazon Purchase",
-            ),
-            Transaction(
-                account_id="act_1", external_id="tx_3",
-                posted_at=now, amount=-3000, description="Coffee Bean & Tea",
-            ),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx_1",
+                    posted_at=now,
+                    amount=-5000,
+                    description="Starbucks Coffee",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx_2",
+                    posted_at=now,
+                    amount=-10000,
+                    description="Amazon Purchase",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx_3",
+                    posted_at=now,
+                    amount=-3000,
+                    description="Coffee Bean & Tea",
+                ),
+            ]
+        )
         await db.commit()
 
         # Search for "coffee" (case insensitive)
@@ -302,16 +318,28 @@ class TestTransactionsEndpoint:
     async def test_transactions_exclude_disabled_accounts(self, client, db):
         """Transactions from disabled accounts are excluded."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))
-        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         now = int(time.time())
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=now, amount=-100, description="Visible",
-        ))
-        db.add(Transaction(
-            account_id="act_2", external_id="tx2",
-            posted_at=now, amount=-200, description="Hidden",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=now,
+                amount=-100,
+                description="Visible",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_2",
+                external_id="tx2",
+                posted_at=now,
+                amount=-200,
+                description="Hidden",
+            )
+        )
         await db.commit()
 
         response = await client.get("/transactions/")
@@ -323,10 +351,15 @@ class TestTransactionsEndpoint:
     async def test_transaction_default_category(self, client, db):
         """Transactions default to 'Uncategorized' category."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-100, description="Test",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-100,
+                description="Test",
+            )
+        )
         await db.commit()
 
         response = await client.get("/transactions/")
@@ -334,15 +367,22 @@ class TestTransactionsEndpoint:
         assert tx["category"] == "Uncategorized"
 
     @pytest.mark.asyncio
-    async def test_transaction_response_includes_transacted_at_and_raw_data(self, client, db):
+    async def test_transaction_response_includes_transacted_at_and_raw_data(
+        self, client, db
+    ):
         """API response includes transacted_at and raw_data fields."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-100, description="Test",
-            transacted_at=1705190400,
-            raw_data='{"simplefin_id":"tx1","pending":false,"extra":{"foo":"bar"}}',
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-100,
+                description="Test",
+                transacted_at=1705190400,
+                raw_data='{"simplefin_id":"tx1","pending":false,"extra":{"foo":"bar"}}',
+            )
+        )
         await db.commit()
 
         response = await client.get("/transactions/")
@@ -355,10 +395,15 @@ class TestTransactionsEndpoint:
     async def test_transaction_response_null_transacted_at(self, client, db):
         """API response returns null transacted_at when not set."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-100, description="Test",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-100,
+                description="Test",
+            )
+        )
         await db.commit()
 
         response = await client.get("/transactions/")
@@ -369,18 +414,30 @@ class TestTransactionsEndpoint:
     async def test_filter_uncategorized(self, client, db):
         """Filter by category=Uncategorized returns only uncategorized transactions."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-100, description="No Cat",
-        ))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx2",
-            posted_at=int(time.time()), amount=-200, description="Has Cat",
-            category="Food",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-100,
+                description="No Cat",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx2",
+                posted_at=int(time.time()),
+                amount=-200,
+                description="Has Cat",
+                category="Food",
+            )
+        )
         await db.commit()
 
-        response = await client.get("/transactions/", params={"category": "Uncategorized"})
+        response = await client.get(
+            "/transactions/", params={"category": "Uncategorized"}
+        )
         data = response.json()
         assert len(data["transactions"]) == 1
         assert data["transactions"][0]["description"] == "No Cat"
@@ -390,11 +447,31 @@ class TestTransactionsEndpoint:
         """List transactions returns total_count, total_income, total_expenses."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         now = int(time.time())
-        db.add_all([
-            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="Expense 1"),
-            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-3000, description="Expense 2"),
-            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=10000, description="Income 1"),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx1",
+                    posted_at=now,
+                    amount=-5000,
+                    description="Expense 1",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx2",
+                    posted_at=now,
+                    amount=-3000,
+                    description="Expense 2",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx3",
+                    posted_at=now,
+                    amount=10000,
+                    description="Income 1",
+                ),
+            ]
+        )
         await db.commit()
 
         response = await client.get("/transactions/")
@@ -408,22 +485,46 @@ class TestTransactionsEndpoint:
         """List transactions supports sorting by different columns."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         now = int(time.time())
-        db.add_all([
-            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="Banana"),
-            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-3000, description="Apple"),
-            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=-8000, description="Cherry"),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx1",
+                    posted_at=now,
+                    amount=-5000,
+                    description="Banana",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx2",
+                    posted_at=now,
+                    amount=-3000,
+                    description="Apple",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx3",
+                    posted_at=now,
+                    amount=-8000,
+                    description="Cherry",
+                ),
+            ]
+        )
         await db.commit()
 
         # Sort by description asc
-        response = await client.get("/transactions/", params={"sort_by": "description", "sort_order": "asc"})
+        response = await client.get(
+            "/transactions/", params={"sort_by": "description", "sort_order": "asc"}
+        )
         txns = response.json()["transactions"]
         assert txns[0]["description"] == "Apple"
         assert txns[1]["description"] == "Banana"
         assert txns[2]["description"] == "Cherry"
 
         # Sort by amount desc (least negative first = largest amount)
-        response = await client.get("/transactions/", params={"sort_by": "amount", "sort_order": "desc"})
+        response = await client.get(
+            "/transactions/", params={"sort_by": "amount", "sort_order": "desc"}
+        )
         txns = response.json()["transactions"]
         assert txns[0]["amount"] == -3000
         assert txns[2]["amount"] == -8000
@@ -434,11 +535,29 @@ class TestTransactionsEndpoint:
         db.add(Account(id="act_a", provider="simplefin", name="Alpha Bank"))
         db.add(Account(id="act_z", provider="simplefin", name="Zeta Bank"))
         now = int(time.time())
-        db.add(Transaction(account_id="act_z", external_id="tx1", posted_at=now, amount=-100, description="From Z"))
-        db.add(Transaction(account_id="act_a", external_id="tx2", posted_at=now, amount=-200, description="From A"))
+        db.add(
+            Transaction(
+                account_id="act_z",
+                external_id="tx1",
+                posted_at=now,
+                amount=-100,
+                description="From Z",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_a",
+                external_id="tx2",
+                posted_at=now,
+                amount=-200,
+                description="From A",
+            )
+        )
         await db.commit()
 
-        response = await client.get("/transactions/", params={"sort_by": "account", "sort_order": "asc"})
+        response = await client.get(
+            "/transactions/", params={"sort_by": "account", "sort_order": "asc"}
+        )
         txns = response.json()["transactions"]
         assert txns[0]["description"] == "From A"
         assert txns[1]["description"] == "From Z"
@@ -448,11 +567,31 @@ class TestTransactionsEndpoint:
         """GET /transactions/ids returns all matching IDs."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         now = int(time.time())
-        db.add_all([
-            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-100, description="A"),
-            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-200, description="B"),
-            Transaction(account_id="act_1", external_id="tx3", posted_at=now, amount=-300, description="C"),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx1",
+                    posted_at=now,
+                    amount=-100,
+                    description="A",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx2",
+                    posted_at=now,
+                    amount=-200,
+                    description="B",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx3",
+                    posted_at=now,
+                    amount=-300,
+                    description="C",
+                ),
+            ]
+        )
         await db.commit()
 
         response = await client.get("/transactions/ids")
@@ -465,13 +604,30 @@ class TestTransactionsEndpoint:
         """GET /transactions/ids respects category filter."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         now = int(time.time())
-        db.add_all([
-            Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-100, description="A", category="Food"),
-            Transaction(account_id="act_1", external_id="tx2", posted_at=now, amount=-200, description="B"),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx1",
+                    posted_at=now,
+                    amount=-100,
+                    description="A",
+                    category="Food",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx2",
+                    posted_at=now,
+                    amount=-200,
+                    description="B",
+                ),
+            ]
+        )
         await db.commit()
 
-        response = await client.get("/transactions/ids", params={"category": "Uncategorized"})
+        response = await client.get(
+            "/transactions/ids", params={"category": "Uncategorized"}
+        )
         data = response.json()
         assert len(data["ids"]) == 1
 
@@ -516,7 +672,11 @@ class TestProviderEndpoints:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({"access_url": "https://test@bridge.simplefin.org/simplefin"})),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {"access_url": "https://test@bridge.simplefin.org/simplefin"}
+                )
+            ),
         )
         db.add(cred)
         await db.commit()
@@ -543,7 +703,11 @@ class TestProviderEndpoints:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({"access_url": "https://test@bridge.simplefin.org/simplefin"})),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {"access_url": "https://test@bridge.simplefin.org/simplefin"}
+                )
+            ),
         )
         db.add(cred)
         await db.commit()
@@ -557,7 +721,6 @@ class TestProviderEndpoints:
         """DELETE /providers/{name}/credentials returns 404 when no credentials exist."""
         response = await client.delete("/providers/simplefin/credentials")
         assert response.status_code == 404
-
 
     @pytest.mark.asyncio
     async def test_store_nelnet_credentials_empty_body_returns_422(self, client):
@@ -605,15 +768,22 @@ class TestSyncEndpoints:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.commit()
 
         mock_result = SyncResult(
-            accounts=[], transactions=[], errors=[], raw_json="{}",
+            accounts=[],
+            transactions=[],
+            errors=[],
+            raw_json="{}",
         )
         mock_provider = AsyncMock()
         mock_provider.provider_name = "simplefin"
@@ -644,15 +814,22 @@ class TestSyncEndpoints:
         cred = Credential(
             id="cred_1",
             provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         await db.commit()
 
         mock_result = SyncResult(
-            accounts=[], transactions=[], errors=[], raw_json="{}",
+            accounts=[],
+            transactions=[],
+            errors=[],
+            raw_json="{}",
         )
         mock_provider = AsyncMock()
         mock_provider.provider_name = "simplefin"
@@ -687,14 +864,16 @@ class TestSyncEndpoints:
     async def test_sync_logs(self, client, db):
         """GET /sync/logs returns recent sync history."""
         now = int(time.time())
-        db.add(SyncLog(
-            provider="simplefin",
-            started_at=now,
-            completed_at=now,
-            status="success",
-            accounts_synced=2,
-            transactions_added=10,
-        ))
+        db.add(
+            SyncLog(
+                provider="simplefin",
+                started_at=now,
+                completed_at=now,
+                status="success",
+                accounts_synced=2,
+                transactions_added=10,
+            )
+        )
         await db.commit()
 
         response = await client.get("/sync/logs")
@@ -771,16 +950,30 @@ class TestAnalyticsEndpoint:
     async def test_analytics_excludes_disabled_accounts(self, client, db):
         """Analytics spending excludes disabled account transactions."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))
-        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         now = int(time.time())
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=now, amount=-5000, description="A", category="Food",
-        ))
-        db.add(Transaction(
-            account_id="act_2", external_id="tx2",
-            posted_at=now, amount=-3000, description="B", category="Food",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=now,
+                amount=-5000,
+                description="A",
+                category="Food",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_2",
+                external_id="tx2",
+                posted_at=now,
+                amount=-3000,
+                description="B",
+                category="Food",
+            )
+        )
         await db.commit()
 
         response = await client.get("/analytics/spending-by-category")
@@ -800,13 +993,50 @@ class TestMonthlyTrendEndpoint:
         jan = 1738368000  # 2025-02-01 approx
         feb = 1740960000  # 2025-03-01 approx
 
-        db.add_all([
-            Transaction(account_id="act_1", external_id="tx1", posted_at=jan, amount=100000, description="Paycheck", category="Income"),
-            Transaction(account_id="act_1", external_id="tx2", posted_at=jan, amount=-5000, description="Coffee", category="Food"),
-            Transaction(account_id="act_1", external_id="tx3", posted_at=feb, amount=100000, description="Paycheck 2", category="Income"),
-            Transaction(account_id="act_1", external_id="tx4", posted_at=feb, amount=-8000, description="Lunch", category="Food"),
-            Transaction(account_id="act_1", external_id="tx5", posted_at=feb, amount=-3000, description="Gas", category="Transportation"),
-        ])
+        db.add_all(
+            [
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx1",
+                    posted_at=jan,
+                    amount=100000,
+                    description="Paycheck",
+                    category="Income",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx2",
+                    posted_at=jan,
+                    amount=-5000,
+                    description="Coffee",
+                    category="Food",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx3",
+                    posted_at=feb,
+                    amount=100000,
+                    description="Paycheck 2",
+                    category="Income",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx4",
+                    posted_at=feb,
+                    amount=-8000,
+                    description="Lunch",
+                    category="Food",
+                ),
+                Transaction(
+                    account_id="act_1",
+                    external_id="tx5",
+                    posted_at=feb,
+                    amount=-3000,
+                    description="Gas",
+                    category="Transportation",
+                ),
+            ]
+        )
         await db.commit()
 
         response = await client.get("/analytics/monthly-trend", params={"months": 24})
@@ -832,10 +1062,28 @@ class TestMonthlyTrendEndpoint:
     async def test_monthly_trend_excludes_disabled(self, client, db):
         """Monthly trend excludes disabled account transactions."""
         db.add(Account(id="act_1", provider="simplefin", name="Visible"))
-        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         now = int(time.time())
-        db.add(Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="A"))
-        db.add(Transaction(account_id="act_2", external_id="tx2", posted_at=now, amount=-3000, description="B"))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=now,
+                amount=-5000,
+                description="A",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_2",
+                external_id="tx2",
+                posted_at=now,
+                amount=-3000,
+                description="B",
+            )
+        )
         await db.commit()
 
         response = await client.get("/analytics/monthly-trend")
@@ -864,17 +1112,25 @@ class TestCategorizeEndpoint:
 
         # Create uncategorized transaction (no categories in DB)
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-100, description="Test",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-100,
+                description="Test",
+            )
+        )
         await db.commit()
 
         response = await client.post("/llm/categorize")
         assert response.status_code == 200
         data = response.json()
         assert data["total_processed"] == 0
-        assert data["error"] == "No categories configured. Add categories before running categorization."
+        assert (
+            data["error"]
+            == "No categories configured. Add categories before running categorization."
+        )
 
         del app.dependency_overrides[_get_client]
 
@@ -899,7 +1155,10 @@ class TestNormalizeDescription:
         assert normalize_description("ACH DEPOSIT 123456789") == "ach deposit"
 
     def test_collapse_whitespace(self):
-        assert normalize_description("STARBUCKS   COFFEE   SHOP") == "starbucks coffee shop"
+        assert (
+            normalize_description("STARBUCKS   COFFEE   SHOP")
+            == "starbucks coffee shop"
+        )
 
     def test_short_numbers_preserved(self):
         """Short trailing numbers (< 6 digits) are preserved."""
@@ -915,8 +1174,10 @@ class TestCategoryMemory:
         """PATCH with category change creates a category_memory entry."""
         db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-5000,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-5000,
             description="BILT PAYMENT 01/15",
         )
         db.add(tx)
@@ -932,6 +1193,7 @@ class TestCategoryMemory:
 
         # Verify memory entry was created
         from sqlalchemy import select
+
         result = await db.scalar(
             select(CategoryMemory).where(
                 CategoryMemory.normalized_pattern == "bilt payment",
@@ -946,17 +1208,21 @@ class TestCategoryMemory:
         """User correction overwrites an existing memory entry."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-5000,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-5000,
             description="BILT PAYMENT",
         )
         db.add(tx)
         # Pre-existing memory entry (from LLM cache)
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Bills",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Bills",
+            )
+        )
         await db.commit()
 
         # User corrects to Housing
@@ -967,6 +1233,7 @@ class TestCategoryMemory:
         assert response.status_code == 200
 
         from sqlalchemy import select
+
         result = await db.scalar(
             select(CategoryMemory).where(
                 CategoryMemory.normalized_pattern == "bilt payment",
@@ -980,16 +1247,21 @@ class TestCategoryMemory:
         """Setting category to 'Uncategorized' deletes the memory entry."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-5000,
-            description="BILT PAYMENT", category="Housing",
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-5000,
+            description="BILT PAYMENT",
+            category="Housing",
         )
         db.add(tx)
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Housing",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
         await db.commit()
 
         response = await client.patch(
@@ -999,8 +1271,11 @@ class TestCategoryMemory:
         assert response.status_code == 200
 
         from sqlalchemy import func, select
+
         count = await db.scalar(
-            select(func.count()).select_from(CategoryMemory).where(
+            select(func.count())
+            .select_from(CategoryMemory)
+            .where(
                 CategoryMemory.normalized_pattern == "bilt payment",
                 CategoryMemory.account_id == "act_1",
             )
@@ -1014,16 +1289,22 @@ class TestCategoryMemory:
         from app.routes.llm import _get_client
 
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Housing",
-        ))
-        db.add(Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-150000,
-            description="BILT PAYMENT 01/15",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx1",
+                posted_at=int(time.time()),
+                amount=-150000,
+                description="BILT PAYMENT 01/15",
+            )
+        )
         await db.commit()
 
         mock_client = AsyncMock(spec=GeminiClient)
@@ -1054,21 +1335,25 @@ class TestCategoryMemory:
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         db.add(Category(name="Food & Dining", description="Restaurants and food"))
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-500,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-500,
             description="SQ *JOES COFFEE",
         )
         db.add(tx)
         await db.commit()
 
-        mock_response = BatchCategorizationResponse(transactions=[
-            TransactionCategorization(
-                id=tx.id,
-                category="Food & Dining",
-                confidence=0.95,
-                reasoning="Coffee shop purchase",
-            ),
-        ])
+        mock_response = BatchCategorizationResponse(
+            transactions=[
+                TransactionCategorization(
+                    id=tx.id,
+                    category="Food & Dining",
+                    confidence=0.95,
+                    reasoning="Coffee shop purchase",
+                ),
+            ]
+        )
 
         mock_client = AsyncMock(spec=GeminiClient)
         mock_client.generate_structured = AsyncMock(return_value=mock_response)
@@ -1083,6 +1368,7 @@ class TestCategoryMemory:
 
         # Verify LLM result was cached
         from sqlalchemy import select
+
         result = await db.scalar(
             select(CategoryMemory).where(
                 CategoryMemory.normalized_pattern == "sq *joes coffee",
@@ -1106,28 +1392,34 @@ class TestCategoryMemory:
         db.add(Category(name="Shopping", description="Shopping"))
         db.add(Category(name="Food & Dining", description="Food"))
         # Pre-existing user correction
-        db.add(CategoryMemory(
-            normalized_pattern="sq *joes coffee",
-            account_id="act_1",
-            category="Shopping",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="sq *joes coffee",
+                account_id="act_1",
+                category="Shopping",
+            )
+        )
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-500,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-500,
             description="SQ *JOES COFFEE",
         )
         db.add(tx)
         await db.commit()
 
         # LLM says Food & Dining, but memory match should kick in first
-        mock_response = BatchCategorizationResponse(transactions=[
-            TransactionCategorization(
-                id=tx.id,
-                category="Food & Dining",
-                confidence=0.95,
-                reasoning="Coffee shop",
-            ),
-        ])
+        mock_response = BatchCategorizationResponse(
+            transactions=[
+                TransactionCategorization(
+                    id=tx.id,
+                    category="Food & Dining",
+                    confidence=0.95,
+                    reasoning="Coffee shop",
+                ),
+            ]
+        )
 
         mock_client = AsyncMock(spec=GeminiClient)
         mock_client.generate_structured = AsyncMock(return_value=mock_response)
@@ -1142,6 +1434,7 @@ class TestCategoryMemory:
 
         # Memory entry should still be Shopping (not overwritten by LLM)
         from sqlalchemy import select
+
         result = await db.scalar(
             select(CategoryMemory).where(
                 CategoryMemory.normalized_pattern == "sq *joes coffee",
@@ -1157,9 +1450,12 @@ class TestCategoryMemory:
         """Manual category change sets categorize_confidence to NULL."""
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-500,
-            description="Test", category="Food",
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-500,
+            description="Test",
+            category="Food",
             categorize_confidence=0.92,
         )
         db.add(tx)
@@ -1183,19 +1479,25 @@ class TestCategoryMemory:
         db.add(Account(id="act_1", provider="simplefin", name="Test"))
         db.add(Category(name="Food & Dining"))
         tx1 = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-500,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-500,
             description="SQ *JOES COFFEE",
         )
         db.add(tx1)
         await db.commit()
 
-        mock_response = BatchCategorizationResponse(transactions=[
-            TransactionCategorization(
-                id=tx1.id, category="Food & Dining",
-                confidence=0.95, reasoning="Coffee",
-            ),
-        ])
+        mock_response = BatchCategorizationResponse(
+            transactions=[
+                TransactionCategorization(
+                    id=tx1.id,
+                    category="Food & Dining",
+                    confidence=0.95,
+                    reasoning="Coffee",
+                ),
+            ]
+        )
 
         mock_client = AsyncMock(spec=GeminiClient)
         mock_client.generate_structured = AsyncMock(return_value=mock_response)
@@ -1208,8 +1510,10 @@ class TestCategoryMemory:
 
         # Add new transaction with same description
         tx2 = Transaction(
-            account_id="act_1", external_id="tx2",
-            posted_at=int(time.time()), amount=-500,
+            account_id="act_1",
+            external_id="tx2",
+            posted_at=int(time.time()),
+            amount=-500,
             description="SQ *JOES COFFEE",
         )
         db.add(tx2)
@@ -1230,15 +1534,19 @@ class TestCategoryMemory:
         """Memory entries are scoped per account_id."""
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         db.add(Account(id="act_2", provider="simplefin", name="Amex"))
-        db.add(CategoryMemory(
-            normalized_pattern="payment",
-            account_id="act_1",
-            category="Housing",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
         # Same description on different account — should NOT match
         tx = Transaction(
-            account_id="act_2", external_id="tx1",
-            posted_at=int(time.time()), amount=-5000,
+            account_id="act_2",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-5000,
             description="PAYMENT",
         )
         db.add(tx)
@@ -1252,11 +1560,16 @@ class TestCategoryMemory:
         db.add(Category(name="Bills"))
         await db.commit()
 
-        mock_response = BatchCategorizationResponse(transactions=[
-            TransactionCategorization(
-                id=tx.id, category="Bills", confidence=0.9, reasoning="Bill payment",
-            ),
-        ])
+        mock_response = BatchCategorizationResponse(
+            transactions=[
+                TransactionCategorization(
+                    id=tx.id,
+                    category="Bills",
+                    confidence=0.9,
+                    reasoning="Bill payment",
+                ),
+            ]
+        )
         mock_client = AsyncMock(spec=GeminiClient)
         mock_client.generate_structured = AsyncMock(return_value=mock_response)
         app = client._transport.app
@@ -1284,31 +1597,48 @@ class TestSyncAutoApplyMemory:
 
         # Set up credential and memory entry
         cred = Credential(
-            id="cred_1", provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Housing",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
         await db.commit()
 
         mock_result = SyncResult(
-            accounts=[ProviderAccount(
-                id="act_1", name="Chase Checking", currency="USD",
-                balance_current=500000,
-            )],
-            transactions=[ProviderTransaction(
-                id="tx_new", account_id="act_1",
-                date=int(time.time()), amount=-150000,
-                description="BILT PAYMENT 02/01", pending=False,
-            )],
-            errors=[], raw_json="{}",
+            accounts=[
+                ProviderAccount(
+                    id="act_1",
+                    name="Chase Checking",
+                    currency="USD",
+                    balance_current=500000,
+                )
+            ],
+            transactions=[
+                ProviderTransaction(
+                    id="tx_new",
+                    account_id="act_1",
+                    date=int(time.time()),
+                    amount=-150000,
+                    description="BILT PAYMENT 02/01",
+                    pending=False,
+                )
+            ],
+            errors=[],
+            raw_json="{}",
         )
         mock_provider = AsyncMock()
         mock_provider.provider_name = "simplefin"
@@ -1346,35 +1676,57 @@ class TestSyncAutoApplyMemory:
         from app.services.sync import _run_sync
 
         cred = Credential(
-            id="cred_1", provider="simplefin",
-            encrypted_data=encrypt(json.dumps({
-                "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
-            })),
+            id="cred_1",
+            provider="simplefin",
+            encrypted_data=encrypt(
+                json.dumps(
+                    {
+                        "access_url": "https://user:pass@bridge.simplefin.org/simplefin",
+                    }
+                )
+            ),
         )
         db.add(cred)
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         # Existing transaction already categorized
-        db.add(Transaction(
-            account_id="act_1", external_id="tx_existing",
-            posted_at=int(time.time()), amount=-150000,
-            description="BILT PAYMENT 01/01", category="Bills",
-        ))
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx_existing",
+                posted_at=int(time.time()),
+                amount=-150000,
+                description="BILT PAYMENT 01/01",
+                category="Bills",
+            )
+        )
         # Memory says Housing
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Housing",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
         await db.commit()
 
         mock_result = SyncResult(
-            accounts=[ProviderAccount(id="act_1", name="Chase", currency="USD", balance_current=500000)],
-            transactions=[ProviderTransaction(
-                id="tx_existing", account_id="act_1",
-                date=int(time.time()), amount=-150000,
-                description="BILT PAYMENT 01/01", pending=False,
-            )],
-            errors=[], raw_json="{}",
+            accounts=[
+                ProviderAccount(
+                    id="act_1", name="Chase", currency="USD", balance_current=500000
+                )
+            ],
+            transactions=[
+                ProviderTransaction(
+                    id="tx_existing",
+                    account_id="act_1",
+                    date=int(time.time()),
+                    amount=-150000,
+                    description="BILT PAYMENT 01/01",
+                    pending=False,
+                )
+            ],
+            errors=[],
+            raw_json="{}",
         )
         mock_provider = AsyncMock()
         mock_provider.provider_name = "simplefin"
@@ -1412,25 +1764,34 @@ class TestPromptMemoryContext:
         db.add(Account(id="act_1", provider="simplefin", name="Chase Checking"))
         db.add(Category(name="Housing"))
         db.add(Category(name="Food & Dining"))
-        db.add(CategoryMemory(
-            normalized_pattern="bilt payment",
-            account_id="act_1",
-            category="Housing",
-        ))
+        db.add(
+            CategoryMemory(
+                normalized_pattern="bilt payment",
+                account_id="act_1",
+                category="Housing",
+            )
+        )
         # Transaction that won't match memory (different description)
         tx = Transaction(
-            account_id="act_1", external_id="tx1",
-            posted_at=int(time.time()), amount=-500,
+            account_id="act_1",
+            external_id="tx1",
+            posted_at=int(time.time()),
+            amount=-500,
             description="NEW RESTAURANT",
         )
         db.add(tx)
         await db.commit()
 
-        mock_response = BatchCategorizationResponse(transactions=[
-            TransactionCategorization(
-                id=tx.id, category="Food & Dining", confidence=0.9, reasoning="Restaurant",
-            ),
-        ])
+        mock_response = BatchCategorizationResponse(
+            transactions=[
+                TransactionCategorization(
+                    id=tx.id,
+                    category="Food & Dining",
+                    confidence=0.9,
+                    reasoning="Restaurant",
+                ),
+            ]
+        )
 
         mock_client = AsyncMock(spec=GeminiClient)
         mock_client.generate_structured = AsyncMock(return_value=mock_response)

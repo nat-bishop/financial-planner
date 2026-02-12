@@ -78,6 +78,7 @@ class GeminiClient:
             f"Structured output failed after {max_retries} retries: {last_error}"
         )
 
+
 def get_gemini_client() -> GeminiClient:
     """Get or create the singleton GeminiClient."""
     global _client

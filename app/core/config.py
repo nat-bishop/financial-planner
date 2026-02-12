@@ -19,7 +19,9 @@ class Settings(BaseSettings):
 
     # Browser provider
     browser_channel: str = "chrome"  # "chrome", "msedge", or "" for bundled Chromium
-    browser_headless: bool = True
+    browser_headless: str = (
+        "new"  # "true", "false", or "new" (new headless mode, harder to detect)
+    )
     browser_viewport_width: int = 1280
     browser_viewport_height: int = 800
     browser_operation_timeout_ms: int = 60000

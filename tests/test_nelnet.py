@@ -1,6 +1,5 @@
 """Tests for Nelnet provider data transformation (pure functions)."""
 
-
 from app.providers.nelnet import (
     NelnetAccountData,
     NelnetPaymentData,

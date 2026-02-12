@@ -51,7 +51,9 @@ async def get_connected_providers(db: AsyncSession) -> list[str]:
     return list(result.all())
 
 
-async def get_credential(db: AsyncSession, provider_name: str = "simplefin") -> Credential | None:
+async def get_credential(
+    db: AsyncSession, provider_name: str = "simplefin"
+) -> Credential | None:
     """Get credential for a provider."""
     return await db.scalar(
         select(Credential).where(Credential.provider == provider_name)
@@ -146,6 +148,7 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
 
     # Determine timeout: 600s for browser (300s sync + 300s 2FA buffer), 30s for API
     from app.providers.browser import BrowserProvider
+
     timeout = 600 if isinstance(provider, BrowserProvider) else 30
 
     async with async_session_maker() as db:
@@ -170,11 +173,15 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
                     exc = sync_task.exception()
                     if exc is not None:
                         if isinstance(exc, TwoFATimeoutError):
-                            _fail_sync_log(sync_log, str(exc), two_fa_status="timed_out")
+                            _fail_sync_log(
+                                sync_log, str(exc), two_fa_status="timed_out"
+                            )
                         elif isinstance(exc, ProviderError):
                             _fail_sync_log(sync_log, str(exc))
                         else:
-                            log.error("Background sync failed for %s: %s", provider_name, exc)
+                            log.error(
+                                "Background sync failed for %s: %s", provider_name, exc
+                            )
                             _fail_sync_log(sync_log, str(exc))
                 else:
                     # Timeout — abandon the task and fail the sync log
@@ -279,7 +286,9 @@ async def _run_sync(
     credential = await get_credential(db, provider.provider_name)
     if not credential:
         sync_log.status = "failed"
-        sync_log.error_message = f"No credentials configured for {provider.display_name}"
+        sync_log.error_message = (
+            f"No credentials configured for {provider.display_name}"
+        )
         sync_log.completed_at = int(time.time())
         return sync_log
 
@@ -409,11 +418,13 @@ async def _upsert_transaction(db: AsyncSession, tx: ProviderTransaction) -> None
         amount=tx.amount,
         description=tx.description,
         is_pending=tx.pending,
-        raw_data=json.dumps({
-            "provider_id": tx.id,
-            "pending": tx.pending,
-            "extra": tx.extra,
-        }),
+        raw_data=json.dumps(
+            {
+                "provider_id": tx.id,
+                "pending": tx.pending,
+                "extra": tx.extra,
+            }
+        ),
         created_at=now,
     )
 

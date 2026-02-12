@@ -38,7 +38,9 @@ class TestTwoFASession:
     @pytest.mark.asyncio
     async def test_wait_and_submit(self):
         """submit_code unblocks wait_for_code and returns correct code."""
-        session = TwoFASession(sync_log_id=1, provider="nelnet", challenge=_make_challenge())
+        session = TwoFASession(
+            sync_log_id=1, provider="nelnet", challenge=_make_challenge()
+        )
 
         async def submit_later():
             await asyncio.sleep(0.05)
@@ -53,7 +55,9 @@ class TestTwoFASession:
     @pytest.mark.asyncio
     async def test_timeout(self):
         """Raises TwoFATimeoutError when no code submitted within timeout."""
-        session = TwoFASession(sync_log_id=1, provider="nelnet", challenge=_make_challenge())
+        session = TwoFASession(
+            sync_log_id=1, provider="nelnet", challenge=_make_challenge()
+        )
 
         with pytest.raises(TwoFATimeoutError, match="not submitted"):
             await session.wait_for_code(timeout=0.1)
@@ -61,7 +65,9 @@ class TestTwoFASession:
     @pytest.mark.asyncio
     async def test_reset_and_retry(self):
         """reset() clears event, allowing a second wait_for_code."""
-        session = TwoFASession(sync_log_id=1, provider="nelnet", challenge=_make_challenge())
+        session = TwoFASession(
+            sync_log_id=1, provider="nelnet", challenge=_make_challenge()
+        )
 
         # First round
         async def submit_first():
@@ -89,7 +95,9 @@ class TestTwoFASession:
 
     def test_max_attempts(self):
         """max_attempts_exceeded becomes True after N submits."""
-        session = TwoFASession(sync_log_id=1, provider="nelnet", challenge=_make_challenge())
+        session = TwoFASession(
+            sync_log_id=1, provider="nelnet", challenge=_make_challenge()
+        )
 
         for i in range(TWO_FA_MAX_ATTEMPTS):
             assert not session.max_attempts_exceeded

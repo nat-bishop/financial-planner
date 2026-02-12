@@ -139,7 +139,8 @@ class TestCategoryEndpoints:
     async def test_patch_category_description(self, client):
         """PATCH can update description."""
         create_resp = await client.post(
-            "/categories/", json={"name": "Custom"},
+            "/categories/",
+            json={"name": "Custom"},
         )
         cat_id = create_resp.json()["id"]
 
@@ -156,10 +157,42 @@ class TestAccountOrdering:
     async def test_accounts_sorted_by_absolute_balance(self, client, db):
         """Accounts are returned sorted by absolute balance descending."""
         now = int(time.time())
-        db.add(Account(id="small", provider="simplefin", name="Small", balance_current=1000, created_at=now))
-        db.add(Account(id="big_neg", provider="simplefin", name="Big Loan", balance_current=-50000, created_at=now))
-        db.add(Account(id="big_pos", provider="simplefin", name="Savings", balance_current=40000, created_at=now))
-        db.add(Account(id="zero", provider="simplefin", name="Empty", balance_current=0, created_at=now))
+        db.add(
+            Account(
+                id="small",
+                provider="simplefin",
+                name="Small",
+                balance_current=1000,
+                created_at=now,
+            )
+        )
+        db.add(
+            Account(
+                id="big_neg",
+                provider="simplefin",
+                name="Big Loan",
+                balance_current=-50000,
+                created_at=now,
+            )
+        )
+        db.add(
+            Account(
+                id="big_pos",
+                provider="simplefin",
+                name="Savings",
+                balance_current=40000,
+                created_at=now,
+            )
+        )
+        db.add(
+            Account(
+                id="zero",
+                provider="simplefin",
+                name="Empty",
+                balance_current=0,
+                created_at=now,
+            )
+        )
         await db.commit()
 
         resp = await client.get("/accounts/")
@@ -172,8 +205,24 @@ class TestAccountOrdering:
     async def test_accounts_null_balance_sorted_last(self, client, db):
         """Accounts with null balance sort after accounts with balance."""
         now = int(time.time())
-        db.add(Account(id="has_balance", provider="simplefin", name="Has", balance_current=5000, created_at=now))
-        db.add(Account(id="no_balance", provider="simplefin", name="None", balance_current=None, created_at=now))
+        db.add(
+            Account(
+                id="has_balance",
+                provider="simplefin",
+                name="Has",
+                balance_current=5000,
+                created_at=now,
+            )
+        )
+        db.add(
+            Account(
+                id="no_balance",
+                provider="simplefin",
+                name="None",
+                balance_current=None,
+                created_at=now,
+            )
+        )
         await db.commit()
 
         resp = await client.get("/accounts/")

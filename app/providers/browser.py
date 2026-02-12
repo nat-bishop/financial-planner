@@ -36,13 +36,14 @@ class BrowserProvider(FinanceProvider):
     async def _browser_session(
         self,
         session_data: dict | None = None,
-        headless: bool | None = None,
+        headless: bool | str | None = None,
     ) -> AsyncGenerator[tuple[Page, BrowserContext], None]:
         """Launch Playwright browser with stealth, optionally restoring session.
 
         Args:
             session_data: Playwright storageState dict to restore.
             headless: Override headless mode. Default: settings.browser_headless.
+                      Accepts True/False or "new" for Playwright's new headless mode.
 
         Yields:
             (page, context) tuple.
@@ -57,7 +58,11 @@ class BrowserProvider(FinanceProvider):
             ) from None
 
         if headless is None:
-            headless = settings.browser_headless
+            raw = settings.browser_headless
+            if raw == "new":
+                headless = "new"
+            else:
+                headless = raw.lower() not in ("false", "0", "no")
 
         pw = await async_playwright().start()
         try:
@@ -114,9 +119,7 @@ class BrowserProvider(FinanceProvider):
         """Human-like pause between actions."""
         await asyncio.sleep(random.randint(min_ms, max_ms) / 1000)
 
-    async def _type_like_human(
-        self, page: Page, selector: str, text: str
-    ) -> None:
+    async def _type_like_human(self, page: Page, selector: str, text: str) -> None:
         """Type text with random delays between keystrokes."""
         await page.click(selector)
         for char in text:

@@ -10,6 +10,7 @@ import time
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "002"
@@ -22,7 +23,10 @@ DEFAULT_CATEGORIES = [
     ("Housing", "Rent, mortgage, property tax, HOA fees"),
     ("Utilities", "Electric, gas, water, sewer, trash, internet, phone"),
     ("Food & Dining", "Groceries, restaurants, takeout, coffee shops, bars"),
-    ("Transportation", "Gas, parking, tolls, public transit, rideshare, car maintenance"),
+    (
+        "Transportation",
+        "Gas, parking, tolls, public transit, rideshare, car maintenance",
+    ),
     ("Shopping", "Clothing, electronics, household items, general retail"),
     ("Health & Medical", "Doctor, dentist, pharmacy, insurance premiums, gym"),
     ("Entertainment", "Streaming, movies, concerts, games, hobbies"),

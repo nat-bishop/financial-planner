@@ -90,7 +90,9 @@ class TestSimpleFINProvider:
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
             result = await provider.sync(
-                credential_data={"access_url": "https://user:pass@bridge.simplefin.org/simplefin"},
+                credential_data={
+                    "access_url": "https://user:pass@bridge.simplefin.org/simplefin"
+                },
                 cursor=None,
             )
 
@@ -116,7 +118,9 @@ class TestSimpleFINProvider:
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
             result = await provider.sync(
-                credential_data={"access_url": "https://user:pass@bridge.simplefin.org/simplefin"},
+                credential_data={
+                    "access_url": "https://user:pass@bridge.simplefin.org/simplefin"
+                },
                 cursor=None,
             )
 
@@ -142,7 +146,9 @@ class TestSimpleFINProvider:
             mock_instance.fetch_accounts = AsyncMock(return_value=mock_response)
 
             result = await provider.sync(
-                credential_data={"access_url": "https://user:pass@bridge.simplefin.org/simplefin"},
+                credential_data={
+                    "access_url": "https://user:pass@bridge.simplefin.org/simplefin"
+                },
                 cursor=None,
             )
 
@@ -160,7 +166,9 @@ class TestSimpleFINProvider:
 
             result = await provider.validate_credentials({"setup_token": "dGVzdA=="})
 
-        assert result == {"access_url": "https://user:pass@bridge.simplefin.org/simplefin"}
+        assert result == {
+            "access_url": "https://user:pass@bridge.simplefin.org/simplefin"
+        }
 
     @pytest.mark.asyncio
     async def test_validate_credentials_missing_token(self):

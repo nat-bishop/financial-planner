@@ -15,13 +15,15 @@ class TestRecurringDetection:
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (150 * 86400)  # 150 days ago
         for i in range(5):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-5000,
-                description="NETFLIX SUBSCRIPTION",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-5000,
+                    description="NETFLIX SUBSCRIPTION",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -39,13 +41,15 @@ class TestRecurringDetection:
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (90 * 86400)
         for i in range(6):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 14 * 86400),
-                amount=-10000,
-                description="MORTGAGE PAYMENT",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 14 * 86400),
+                    amount=-10000,
+                    description="MORTGAGE PAYMENT",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -58,13 +62,15 @@ class TestRecurringDetection:
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (60 * 86400)
         for i in range(2):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-5000,
-                description="RARE PAYMENT",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-5000,
+                    description="RARE PAYMENT",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -78,13 +84,15 @@ class TestRecurringDetection:
         # Highly irregular intervals: 5, 50, 10, 40 days
         offsets = [0, 5, 55, 65, 105]
         for i, offset in enumerate(offsets):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (offset * 86400),
-                amount=-3000,
-                description="RANDOM STORE",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (offset * 86400),
+                    amount=-3000,
+                    description="RANDOM STORE",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -93,16 +101,20 @@ class TestRecurringDetection:
     @pytest.mark.asyncio
     async def test_excludes_disabled_accounts(self, db):
         """Does not detect patterns from disabled accounts."""
-        db.add(Account(id="act_1", provider="simplefin", name="Hidden", is_disabled=True))
+        db.add(
+            Account(id="act_1", provider="simplefin", name="Hidden", is_disabled=True)
+        )
         base = int(time.time()) - (120 * 86400)
         for i in range(4):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-5000,
-                description="NETFLIX",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-5000,
+                    description="NETFLIX",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -114,20 +126,24 @@ class TestRecurringDetection:
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (90 * 86400)
         for i in range(4):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-5000,
-                description="MONTHLY BILL",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-5000,
+                    description="MONTHLY BILL",
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
         assert len(patterns) == 1
         last_ts = base + (3 * 30 * 86400)
         # Predicted next should be ~30 days after last
-        assert abs(patterns[0].predicted_next - (last_ts + 30 * 86400)) < 86400  # within 1 day
+        assert (
+            abs(patterns[0].predicted_next - (last_ts + 30 * 86400)) < 86400
+        )  # within 1 day
 
     @pytest.mark.asyncio
     async def test_direction_income(self, db):
@@ -136,28 +152,36 @@ class TestRecurringDetection:
         base = int(time.time()) - (120 * 86400)
         for i in range(4):
             # Paycheck
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"pay_{i}",
-                posted_at=base + (i * 14 * 86400),
-                amount=200000,
-                description="EMPLOYER DIRECT DEPOSIT",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"pay_{i}",
+                    posted_at=base + (i * 14 * 86400),
+                    amount=200000,
+                    description="EMPLOYER DIRECT DEPOSIT",
+                )
+            )
             # Bill (should be excluded when direction=income)
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"bill_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-5000,
-                description="NETFLIX",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"bill_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-5000,
+                    description="NETFLIX",
+                )
+            )
         await db.commit()
 
-        income_patterns = await detect_recurring(db, lookback_months=12, direction="income")
+        income_patterns = await detect_recurring(
+            db, lookback_months=12, direction="income"
+        )
         assert len(income_patterns) == 1
         assert income_patterns[0].description == "employer direct deposit"
 
-        expense_patterns = await detect_recurring(db, lookback_months=12, direction="expense")
+        expense_patterns = await detect_recurring(
+            db, lookback_months=12, direction="expense"
+        )
         assert len(expense_patterns) == 1
         assert expense_patterns[0].description == "netflix"
 
@@ -173,13 +197,15 @@ class TestRecurringDetection:
             "BILT PAYMENT 04/15",
         ]
         for i, desc in enumerate(descs):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-150000,
-                description=desc,
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-150000,
+                    description=desc,
+                )
+            )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")
@@ -194,13 +220,15 @@ class TestRecurringBillsEndpoint:
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (120 * 86400)
         for i in range(4):
-            db.add(Transaction(
-                account_id="act_1",
-                external_id=f"tx_{i}",
-                posted_at=base + (i * 30 * 86400),
-                amount=-1500,
-                description="SPOTIFY",
-            ))
+            db.add(
+                Transaction(
+                    account_id="act_1",
+                    external_id=f"tx_{i}",
+                    posted_at=base + (i * 30 * 86400),
+                    amount=-1500,
+                    description="SPOTIFY",
+                )
+            )
         await db.commit()
 
         response = await client.get("/analytics/recurring-bills")

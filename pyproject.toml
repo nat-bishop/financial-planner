@@ -133,3 +133,8 @@ reportUnusedCallResult = false
 
 # Dynamic data uses dict[str, Any] intentionally
 reportExplicitAny = false
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.37.4",
+]

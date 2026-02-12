@@ -16,9 +16,24 @@ def _seed_categories(db):
     """Add a few default categories to the DB."""
     now = int(time.time())
     cats = [
-        Category(name="Food & Dining", description="Groceries, restaurants", is_default=True, created_at=now),
-        Category(name="Transportation", description="Gas, parking, tolls", is_default=True, created_at=now),
-        Category(name="Shopping", description="Clothing, electronics", is_default=True, created_at=now),
+        Category(
+            name="Food & Dining",
+            description="Groceries, restaurants",
+            is_default=True,
+            created_at=now,
+        ),
+        Category(
+            name="Transportation",
+            description="Gas, parking, tolls",
+            is_default=True,
+            created_at=now,
+        ),
+        Category(
+            name="Shopping",
+            description="Clothing, electronics",
+            is_default=True,
+            created_at=now,
+        ),
     ]
     for c in cats:
         db.add(c)
@@ -27,7 +42,9 @@ def _seed_categories(db):
 def _seed_transactions(db, count=3):
     """Add test transactions."""
     now = int(time.time())
-    account = Account(id="test-acc", name="Test Checking", org_name="Test Bank", created_at=now)
+    account = Account(
+        id="test-acc", name="Test Checking", org_name="Test Bank", created_at=now
+    )
     db.add(account)
 
     txs = []
@@ -197,12 +214,22 @@ class TestTransactionFilters:
         db.add(account)
 
         tx1 = Transaction(
-            account_id="acc-f", external_id="f-1", posted_at=now,
-            amount=-100, description="Categorized", category="Food & Dining", created_at=now,
+            account_id="acc-f",
+            external_id="f-1",
+            posted_at=now,
+            amount=-100,
+            description="Categorized",
+            category="Food & Dining",
+            created_at=now,
         )
         tx2 = Transaction(
-            account_id="acc-f", external_id="f-2", posted_at=now,
-            amount=-200, description="Uncategorized", category="Uncategorized", created_at=now,
+            account_id="acc-f",
+            external_id="f-2",
+            posted_at=now,
+            amount=-200,
+            description="Uncategorized",
+            category="Uncategorized",
+            created_at=now,
         )
         db.add_all([tx1, tx2])
         await db.flush()
@@ -220,17 +247,29 @@ class TestTransactionFilters:
         db.add(account)
 
         tx1 = Transaction(
-            account_id="acc-g", external_id="g-1", posted_at=now,
-            amount=-100, description="T1", category="Unable to Categorize", created_at=now,
+            account_id="acc-g",
+            external_id="g-1",
+            posted_at=now,
+            amount=-100,
+            description="T1",
+            category="Unable to Categorize",
+            created_at=now,
         )
         tx2 = Transaction(
-            account_id="acc-g", external_id="g-2", posted_at=now,
-            amount=-200, description="T2", category="Food & Dining", created_at=now,
+            account_id="acc-g",
+            external_id="g-2",
+            posted_at=now,
+            amount=-200,
+            description="T2",
+            category="Food & Dining",
+            created_at=now,
         )
         db.add_all([tx1, tx2])
         await db.flush()
 
-        resp = await client.get("/transactions/", params={"category": "Unable to Categorize"})
+        resp = await client.get(
+            "/transactions/", params={"category": "Unable to Categorize"}
+        )
         assert resp.status_code == 200
         data = resp.json()["transactions"]
         assert len(data) == 1

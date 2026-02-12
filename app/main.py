@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 def _run_migrations() -> None:
     """Run Alembic migrations to head on startup."""
-    from alembic import command  # noqa: I001
+    from alembic import command
     from alembic.config import Config
 
     alembic_cfg = Config("alembic.ini")

@@ -145,11 +145,13 @@ async def sync_status(
         )
 
         if not last_sync:
-            statuses.append(ProviderSyncStatus(
-                provider=p.provider_name,
-                display_name=p.display_name,
-                status="idle",
-            ))
+            statuses.append(
+                ProviderSyncStatus(
+                    provider=p.provider_name,
+                    display_name=p.display_name,
+                    status="idle",
+                )
+            )
             continue
 
         status = ProviderSyncStatus(
@@ -181,8 +183,6 @@ async def sync_logs(
 ) -> list[SyncLog]:
     """Get recent sync history."""
     result = await db.scalars(
-        select(SyncLog)
-        .order_by(SyncLog.started_at.desc())
-        .limit(limit)
+        select(SyncLog).order_by(SyncLog.started_at.desc()).limit(limit)
     )
     return list(result.all())

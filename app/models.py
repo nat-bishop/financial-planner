@@ -27,8 +27,12 @@ class Credential(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     provider: Mapped[str] = mapped_column(String, unique=True)  # 'simplefin', 'nelnet'
     encrypted_data: Mapped[str] = mapped_column(Text)  # Fernet-encrypted JSON
-    session_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # Encrypted browser session
-    sync_cursor: Mapped[str | None] = mapped_column(String, nullable=True)  # Unix timestamp of last sync
+    session_data: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # Encrypted browser session
+    sync_cursor: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # Unix timestamp of last sync
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -76,19 +80,29 @@ class Transaction(Base):
 
     # Core data (from provider)
     posted_at: Mapped[int] = mapped_column(Integer)  # Unix timestamp
-    transacted_at: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Unix timestamp (optional)
+    transacted_at: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )  # Unix timestamp (optional)
     amount: Mapped[int] = mapped_column(Integer)  # Cents (positive = deposit)
     description: Mapped[str] = mapped_column(String)
     is_pending: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Enrichment (app-managed)
-    category: Mapped[str] = mapped_column(String, nullable=False, default="Uncategorized", server_default="Uncategorized", index=True)
+    category: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="Uncategorized",
+        server_default="Uncategorized",
+        index=True,
+    )
     categorize_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Metadata
-    raw_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # Full provider JSON
+    raw_data: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # Full provider JSON
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -107,8 +121,12 @@ class SyncLog(Base):
     status: Mapped[str] = mapped_column(
         String, default="running"
     )  # running, success, failed, awaiting_2fa
-    two_fa_status: Mapped[str | None] = mapped_column(String, nullable=True)  # awaiting_code, code_submitted, timed_out
-    two_fa_method: Mapped[str | None] = mapped_column(String, nullable=True)  # sms, email, authenticator
+    two_fa_status: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # awaiting_code, code_submitted, timed_out
+    two_fa_method: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # sms, email, authenticator
     accounts_synced: Mapped[int] = mapped_column(Integer, default=0)
     transactions_added: Mapped[int] = mapped_column(Integer, default=0)
     transactions_updated: Mapped[int] = mapped_column(Integer, default=0)
@@ -127,7 +145,9 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    exclude_from_totals: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    exclude_from_totals: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
 
 
@@ -167,9 +187,9 @@ def normalize_description(description: str) -> str:
     Strips trailing dates, reference numbers, and collapses whitespace.
     """
     s = description.lower().strip()
-    s = re.sub(r'\s+\d{2}/\d{2}(/\d{2,4})?\s*$', '', s)  # trailing dates
-    s = re.sub(r'\s+#?\d{6,}\s*$', '', s)  # trailing ref numbers
-    s = re.sub(r'\s+', ' ', s)  # collapse spaces
+    s = re.sub(r"\s+\d{2}/\d{2}(/\d{2,4})?\s*$", "", s)  # trailing dates
+    s = re.sub(r"\s+#?\d{6,}\s*$", "", s)  # trailing ref numbers
+    s = re.sub(r"\s+", " ", s)  # collapse spaces
     return s.strip()
 
 

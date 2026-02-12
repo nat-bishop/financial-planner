@@ -47,13 +47,15 @@ async def get_provider_statuses(db: AsyncSession) -> list[ProviderStatusResponse
             .order_by(SyncLog.started_at.desc())
             .limit(1)
         )
-        statuses.append(ProviderStatusResponse(
-            provider=p.provider_name,
-            display_name=p.display_name,
-            connected=cred is not None,
-            last_sync_at=last_sync.started_at if last_sync else None,
-            last_sync_status=last_sync.status if last_sync else None,
-        ))
+        statuses.append(
+            ProviderStatusResponse(
+                provider=p.provider_name,
+                display_name=p.display_name,
+                connected=cred is not None,
+                last_sync_at=last_sync.started_at if last_sync else None,
+                last_sync_status=last_sync.status if last_sync else None,
+            )
+        )
     return statuses
 
 
@@ -80,12 +82,12 @@ async def store_credentials(
     try:
         provider = get_provider(name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown provider: {name}") from None
+        raise HTTPException(
+            status_code=404, detail=f"Unknown provider: {name}"
+        ) from None
 
     # Check if credentials already exist
-    existing = await db.scalar(
-        select(Credential).where(Credential.provider == name)
-    )
+    existing = await db.scalar(select(Credential).where(Credential.provider == name))
     if existing:
         raise HTTPException(
             status_code=400,
@@ -130,11 +132,11 @@ async def update_credentials(
     try:
         provider = get_provider(name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown provider: {name}") from None
+        raise HTTPException(
+            status_code=404, detail=f"Unknown provider: {name}"
+        ) from None
 
-    existing = await db.scalar(
-        select(Credential).where(Credential.provider == name)
-    )
+    existing = await db.scalar(select(Credential).where(Credential.provider == name))
     if not existing:
         raise HTTPException(
             status_code=404,
@@ -170,9 +172,7 @@ async def delete_credentials(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Delete credentials and session data for a provider."""
-    credential = await db.scalar(
-        select(Credential).where(Credential.provider == name)
-    )
+    credential = await db.scalar(select(Credential).where(Credential.provider == name))
     if not credential:
         raise HTTPException(status_code=404, detail="No credentials found")
 

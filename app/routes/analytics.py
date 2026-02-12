@@ -46,8 +46,12 @@ async def monthly_trend(
     query = (
         select(
             month_col.label("month"),
-            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label("income"),
-            func.sum(case((Transaction.amount < 0, -Transaction.amount), else_=0)).label("expenses"),
+            func.sum(case((Transaction.amount > 0, Transaction.amount), else_=0)).label(
+                "income"
+            ),
+            func.sum(
+                case((Transaction.amount < 0, -Transaction.amount), else_=0)
+            ).label("expenses"),
             func.count(Transaction.id).label("tx_count"),
         )
         .where(Transaction.posted_at >= start_ts)
@@ -57,7 +61,9 @@ async def monthly_trend(
     query = exclude_disabled_accounts(query)
 
     if not include_excluded:
-        excluded_names = select(Category.name).where(Category.exclude_from_totals == True)  # noqa: E712
+        excluded_names = select(Category.name).where(
+            Category.exclude_from_totals == True  # noqa: E712
+        )
         query = query.where(Transaction.category.notin_(excluded_names))
 
     result = await db.execute(query)
@@ -69,14 +75,16 @@ async def monthly_trend(
         month_start = calendar.timegm(time.strptime(f"{year}-{mon}-01", "%Y-%m-%d"))
         income = row.income or 0
         expenses = row.expenses or 0
-        buckets.append(MonthlyBucket(
-            month=row.month,
-            month_start=month_start,
-            income=income,
-            expenses=expenses,
-            net=income - expenses,
-            transaction_count=row.tx_count,
-        ))
+        buckets.append(
+            MonthlyBucket(
+                month=row.month,
+                month_start=month_start,
+                income=income,
+                expenses=expenses,
+                net=income - expenses,
+                transaction_count=row.tx_count,
+            )
+        )
 
     return MonthlyTrendResponse(months=buckets)
 
@@ -120,7 +128,9 @@ async def spending_by_category(
     query = exclude_disabled_accounts(query)
 
     if not include_excluded:
-        excluded_names = select(Category.name).where(Category.exclude_from_totals == True)  # noqa: E712
+        excluded_names = select(Category.name).where(
+            Category.exclude_from_totals == True  # noqa: E712
+        )
         query = query.where(Transaction.category.notin_(excluded_names))
 
     result = await db.execute(query)
@@ -157,7 +167,9 @@ async def recurring_bills(
     db: AsyncSession = Depends(get_db),
 ) -> RecurringBillsResponse:
     """Detect recurring bills from transaction patterns."""
-    patterns = await detect_recurring(db, lookback_months=lookback_months, direction="expense")
+    patterns = await detect_recurring(
+        db, lookback_months=lookback_months, direction="expense"
+    )
 
     bills = [
         RecurringBill(
@@ -196,17 +208,21 @@ def _compute_projection(
         for month in range(1, years * 12 + 1):
             balance = int(balance * (1 + monthly_rate)) + monthly_contribution
             if month % 12 == 0:
-                points.append(ProjectionPoint(
-                    year=month // 12,
-                    balance=balance,
-                    contributions=monthly_contribution * month,
-                ))
+                points.append(
+                    ProjectionPoint(
+                        year=month // 12,
+                        balance=balance,
+                        contributions=monthly_contribution * month,
+                    )
+                )
         pct = int(rate * 100)
-        bands.append(ProjectionBand(
-            label=f"{label.title()} ({pct}%)",
-            annual_return=rate,
-            points=points,
-        ))
+        bands.append(
+            ProjectionBand(
+                label=f"{label.title()} ({pct}%)",
+                annual_return=rate,
+                points=points,
+            )
+        )
     return bands
 
 
@@ -226,7 +242,11 @@ async def income_projection(
     return_rates = dict(_DEFAULT_RETURNS)
 
     # Check for user configuration
-    for key_name in ("projection_income_sources", "projection_monthly_contribution", "projection_return_rates"):
+    for key_name in (
+        "projection_income_sources",
+        "projection_monthly_contribution",
+        "projection_return_rates",
+    ):
         setting = await db.get(UserSetting, key_name)
         if setting:
             is_configured = True
@@ -246,7 +266,9 @@ async def income_projection(
         monthly_income = sum(s.monthly_amount for s in income_sources)
     else:
         # Try recurring income detection first
-        recurring_income = await detect_recurring(db, lookback_months=6, direction="income")
+        recurring_income = await detect_recurring(
+            db, lookback_months=6, direction="income"
+        )
         if recurring_income:
             monthly_income = 0
             for p in recurring_income:
@@ -259,7 +281,9 @@ async def income_projection(
                 else:
                     continue
                 monthly_income += monthly_amt
-                income_sources.append(IncomeSource(name=p.raw_description, monthly_amount=monthly_amt))
+                income_sources.append(
+                    IncomeSource(name=p.raw_description, monthly_amount=monthly_amt)
+                )
         else:
             # Fallback: average positive amounts over last 3 months
             now = int(time.time())

@@ -9,6 +9,7 @@ Create Date: 2026-02-08
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "004"
@@ -19,7 +20,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # 1. Fill NULLs BEFORE making column non-nullable
-    op.execute("UPDATE transactions SET category = 'Uncategorized' WHERE category IS NULL")
+    op.execute(
+        "UPDATE transactions SET category = 'Uncategorized' WHERE category IS NULL"
+    )
 
     # 2. Schema change (batch mode for SQLite)
     with op.batch_alter_table("transactions") as batch_op:
@@ -48,7 +51,10 @@ def downgrade() -> None:
         ("Housing", "Rent, mortgage, property tax, HOA fees"),
         ("Utilities", "Electric, gas, water, sewer, trash, internet, phone"),
         ("Food & Dining", "Groceries, restaurants, takeout, coffee shops, bars"),
-        ("Transportation", "Gas, parking, tolls, public transit, rideshare, car maintenance"),
+        (
+            "Transportation",
+            "Gas, parking, tolls, public transit, rideshare, car maintenance",
+        ),
         ("Shopping", "Clothing, electronics, household items, general retail"),
         ("Health & Medical", "Doctor, dentist, pharmacy, insurance premiums, gym"),
         ("Entertainment", "Streaming, movies, concerts, games, hobbies"),

@@ -52,5 +52,3 @@ async def categorize(
         return await categorize_transactions(db, client, transaction_ids)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from None
-
-

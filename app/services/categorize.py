@@ -39,16 +39,18 @@ def _prepare_transactions(transactions: list[Transaction]) -> list[dict]:
     items = []
     for tx in transactions:
         account = tx.account
-        items.append({
-            "id": tx.id,
-            "description": tx.description,
-            "amount": tx.amount,
-            "date": time.strftime("%Y-%m-%d", time.gmtime(tx.posted_at)),
-            "is_pending": tx.is_pending,
-            "account_name": account.name if account else "Unknown",
-            "bank_name": account.org_name if account else None,
-            "account_type": account.account_type if account else None,
-        })
+        items.append(
+            {
+                "id": tx.id,
+                "description": tx.description,
+                "amount": tx.amount,
+                "date": time.strftime("%Y-%m-%d", time.gmtime(tx.posted_at)),
+                "is_pending": tx.is_pending,
+                "account_name": account.name if account else "Unknown",
+                "bank_name": account.org_name if account else None,
+                "account_type": account.account_type if account else None,
+            }
+        )
     return items
 
 
@@ -80,9 +82,7 @@ async def apply_memory_rules(
             CategoryMemory.account_id.in_(account_values),
         )
     )
-    memory_entries = {
-        (m.normalized_pattern, m.account_id): m for m in result.all()
-    }
+    memory_entries = {(m.normalized_pattern, m.account_id): m for m in result.all()}
 
     matched = []
     unmatched = []
@@ -147,9 +147,7 @@ async def _fetch_memory_context(
     entries = result.all()
 
     # Fetch account names for display
-    acct_result = await db.scalars(
-        select(Account).where(Account.id.in_(account_ids))
-    )
+    acct_result = await db.scalars(select(Account).where(Account.id.in_(account_ids)))
     acct_names = {a.id: a.name for a in acct_result.all()}
 
     return [
@@ -174,10 +172,7 @@ async def categorize_transactions(
     3. Cache LLM results into memory
     """
     # Fetch transactions
-    query = (
-        select(Transaction)
-        .options(selectinload(Transaction.account))
-    )
+    query = select(Transaction).options(selectinload(Transaction.account))
     if transaction_ids:
         query = query.where(Transaction.id.in_(transaction_ids))
     else:

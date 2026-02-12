@@ -14,9 +14,7 @@ async def list_categories(
     db: AsyncSession = Depends(get_db),
 ) -> list[Category]:
     """List all categories."""
-    result = await db.scalars(
-        select(Category).order_by(Category.name)
-    )
+    result = await db.scalars(select(Category).order_by(Category.name))
     return list(result.all())
 
 
@@ -26,13 +24,15 @@ async def create_category(
     db: AsyncSession = Depends(get_db),
 ) -> Category:
     """Create a custom category."""
-    existing = await db.scalar(
-        select(Category).where(Category.name == data.name)
-    )
+    existing = await db.scalar(select(Category).where(Category.name == data.name))
     if existing:
         raise HTTPException(status_code=400, detail="Category already exists")
 
-    category = Category(name=data.name, description=data.description, exclude_from_totals=data.exclude_from_totals)
+    category = Category(
+        name=data.name,
+        description=data.description,
+        exclude_from_totals=data.exclude_from_totals,
+    )
     db.add(category)
     await db.flush()
     return category

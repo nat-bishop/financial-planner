@@ -98,9 +98,7 @@ class SimpleFINClient:
             password=parsed.password or "",
         )
         # Rebuild URL without credentials
-        self._base_url = parsed._replace(
-            netloc=parsed.hostname or ""
-        ).geturl()
+        self._base_url = parsed._replace(netloc=parsed.hostname or "").geturl()
 
     async def fetch_accounts(
         self,
@@ -128,7 +126,9 @@ class SimpleFINClient:
 
         params: dict[str, str] = {
             "start-date": str(start_date),
-            "end-date": str(end_date + 1),  # exclusive — add 1 to include current second
+            "end-date": str(
+                end_date + 1
+            ),  # exclusive — add 1 to include current second
             "pending": "1",
         }
 
@@ -145,16 +145,16 @@ class SimpleFINClient:
         if not resp.is_success:
             errors = data.get("errors", [])
             if errors:
-                raise RuntimeError(
-                    "SimpleFIN: " + "; ".join(errors)
-                )
+                raise RuntimeError("SimpleFIN: " + "; ".join(errors))
             resp.raise_for_status()
 
         # Strip credentials from raw JSON before storing
-        raw_json = json.dumps({
-            "accounts_count": len(data.get("accounts", [])),
-            "errors": data.get("errors", []),
-        })
+        raw_json = json.dumps(
+            {
+                "accounts_count": len(data.get("accounts", [])),
+                "errors": data.get("errors", []),
+            }
+        )
 
         accounts: list[SFAccount] = []
         transactions: list[SFTransaction] = []
@@ -169,7 +169,9 @@ class SimpleFINClient:
                 id=acc_data["id"],
                 name=acc_data.get("name", ""),
                 currency=acc_data.get("currency", "USD"),
-                balance_current=_sfin_amount_to_cents(str(acc_data.get("balance", "0"))),
+                balance_current=_sfin_amount_to_cents(
+                    str(acc_data.get("balance", "0"))
+                ),
                 balance_available=(
                     _sfin_amount_to_cents(str(acc_data["available-balance"]))
                     if acc_data.get("available-balance") is not None

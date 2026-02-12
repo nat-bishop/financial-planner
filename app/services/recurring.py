@@ -149,7 +149,11 @@ async def detect_recurring(
             continue
 
         # Compute confidence
-        confidence = max(0.0, min(1.0, 1.0 - (std_dev / median_interval))) if median_interval > 0 else 0.0
+        confidence = (
+            max(0.0, min(1.0, 1.0 - (std_dev / median_interval)))
+            if median_interval > 0
+            else 0.0
+        )
 
         # Predict next occurrence
         last_ts = timestamps[-1]
@@ -162,18 +166,20 @@ async def detect_recurring(
         # Most recent raw description and account name
         last_tx, acct_name = txns[-1]
 
-        patterns.append(RecurringPattern(
-            description=norm_desc,
-            raw_description=last_tx.description,
-            account_id=acct_id,
-            account_name=acct_name,
-            frequency=frequency,
-            median_amount=median_amount,
-            last_occurrence=last_ts,
-            predicted_next=predicted_next,
-            occurrence_count=len(txns),
-            confidence=confidence,
-        ))
+        patterns.append(
+            RecurringPattern(
+                description=norm_desc,
+                raw_description=last_tx.description,
+                account_id=acct_id,
+                account_name=acct_name,
+                frequency=frequency,
+                median_amount=median_amount,
+                last_occurrence=last_ts,
+                predicted_next=predicted_next,
+                occurrence_count=len(txns),
+                confidence=confidence,
+            )
+        )
 
     # Sort by predicted_next ascending
     patterns.sort(key=lambda p: p.predicted_next)

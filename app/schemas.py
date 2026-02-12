@@ -323,5 +323,3 @@ class SettingValue(BaseModel):
 class SettingResponse(BaseModel):
     key: str
     value: Any
-
-
