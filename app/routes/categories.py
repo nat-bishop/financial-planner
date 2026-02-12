@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import Category, Transaction
-from app.schemas import CategoryCreate, CategoryResponse
+from app.schemas import CategoryCreate, CategoryResponse, CategoryUpdate
 
 router = APIRouter()
 
@@ -32,9 +32,27 @@ async def create_category(
     if existing:
         raise HTTPException(status_code=400, detail="Category already exists")
 
-    category = Category(name=data.name, description=data.description)
+    category = Category(name=data.name, description=data.description, exclude_from_totals=data.exclude_from_totals)
     db.add(category)
     await db.flush()
+    return category
+
+
+@router.patch("/{category_id}", response_model=CategoryResponse)
+async def update_category(
+    category_id: int,
+    update: CategoryUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> Category:
+    """Update a category's settings (e.g., exclude_from_totals)."""
+    category = await db.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    update_data = update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(category, field, value)
+
     return category
 
 
@@ -53,14 +71,12 @@ async def delete_category(
     if category.is_default:
         raise HTTPException(status_code=400, detail="Cannot delete default categories")
 
-    # Reset category on affected transactions
-    result = await db.scalars(
-        select(Transaction).where(Transaction.category == category.name)
+    # Reset category on affected transactions (bulk update)
+    await db.execute(
+        update(Transaction)
+        .where(Transaction.category == category.name)
+        .values(category="Uncategorized", categorize_confidence=None)
     )
-    for tx in result.all():
-        tx.category = "Uncategorized"
-        tx.subcategory = None
-        tx.categorize_confidence = None
 
     await db.delete(category)
     return {"status": "deleted"}

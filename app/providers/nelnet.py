@@ -135,9 +135,11 @@ class NelnetProvider(BrowserProvider):
             )
 
     def _needs_login(self, page: Page) -> bool:
-        """Check if on a login or auth page (not the dashboard).
+        """Check if on a login, auth, or unauthenticated page.
 
-        Checks the URL host only — not query params, which can contain
+        Detects: auth domain, /account/login path, and /welcome redirect
+        (the site redirects unauthenticated /dashboard requests to /welcome).
+        Only checks host/path — not query params, which can contain
         auth domain references (e.g. ``iss=...auth.nelnet.studentaid.gov``).
         """
         from urllib.parse import urlparse
@@ -148,6 +150,7 @@ class NelnetProvider(BrowserProvider):
         return (
             host == NELNET_AUTH_DOMAIN
             or "/account/login" in path
+            or path.rstrip("/") == "/welcome"
         )
 
     async def _dismiss_dialog(self, page: Page) -> None:
@@ -220,15 +223,17 @@ class NelnetProvider(BrowserProvider):
         except ProviderError:
             raise
         except Exception as e:
+            debug_info = await self._capture_debug_snapshot(page, "login")
             if "timeout" in str(e).lower():
                 raise ProviderError(
                     "Login timed out",
                     self.provider_name,
-                    detail={"type": "timeout", "page": page.url},
+                    detail={"type": "timeout", "page": page.url, "debug": debug_info},
                 ) from e
             raise ProviderError(
                 f"Login failed: {e}",
                 self.provider_name,
+                detail={"debug": debug_info},
             ) from e
 
     async def _handle_2fa(
@@ -310,7 +315,10 @@ class NelnetProvider(BrowserProvider):
         accounts: list[NelnetAccountData] = []
         try:
             await page.goto(NELNET_LOAN_DETAILS_URL, wait_until="load")
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("networkidle", timeout=15_000)
             await self._random_delay(1000, 2000)
+            log.info("Scraping accounts from %s", page.url)
 
             # Wait for the page to be ready
             await page.get_by_text("Group and Loan Summary").wait_for(timeout=15_000)
@@ -352,10 +360,11 @@ class NelnetProvider(BrowserProvider):
         except ProviderError:
             raise
         except Exception as e:
+            debug_info = await self._capture_debug_snapshot(page, "scrape_accounts")
             raise ProviderError(
                 f"Failed to scrape accounts: {e}",
                 self.provider_name,
-                detail={"type": "scrape_error", "page": "loan-details"},
+                detail={"type": "scrape_error", "page": "loan-details", "debug": debug_info},
             ) from e
 
         return accounts
@@ -385,7 +394,10 @@ class NelnetProvider(BrowserProvider):
         payments: list[NelnetPaymentData] = []
         try:
             await page.goto(NELNET_PAYMENT_ACTIVITY_URL, wait_until="load")
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("networkidle", timeout=15_000)
             await self._random_delay(1000, 2000)
+            log.info("Scraping payments from %s", page.url)
 
             # Wait for table to appear
             table = page.get_by_role("table", name="Payment History")
@@ -410,10 +422,11 @@ class NelnetProvider(BrowserProvider):
         except ProviderError:
             raise
         except Exception as e:
+            debug_info = await self._capture_debug_snapshot(page, "scrape_payments")
             raise ProviderError(
                 f"Failed to scrape payments: {e}",
                 self.provider_name,
-                detail={"type": "scrape_error", "page": "payment-activity"},
+                detail={"type": "scrape_error", "page": "payment-activity", "debug": debug_info},
             ) from e
 
         return payments

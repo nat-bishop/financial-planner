@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, computed, reactive } from 'vue'
+import { onMounted, onUnmounted, ref, watch, computed, reactive } from 'vue'
 import { useTransactionsStore } from '../stores/transactions'
 import { useAccountsStore } from '../stores/accounts'
 import { useCategoriesStore } from '../stores/categories'
@@ -41,6 +41,11 @@ onMounted(async () => {
     llmStore.fetchStatus(),
   ])
   await transactionsStore.fetch()
+})
+
+onUnmounted(() => {
+  clearTimeout(searchTimeout)
+  clearTimeout(toastTimeout)
 })
 
 // Debounced search
@@ -354,6 +359,9 @@ const isConfigured = computed(() => llmStore.status?.configured ?? false)
         <option value="">All categories</option>
         <option value="Uncategorized">Uncategorized</option>
         <option value="Unable to Categorize">Unable to Categorize</option>
+        <option v-for="cat in categoriesStore.categories" :key="cat.id" :value="cat.name">
+          {{ cat.name }}
+        </option>
       </select>
 
       <!-- Clear filters -->

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
@@ -8,6 +7,7 @@ const links = [
   { to: '/', label: 'Overview', icon: 'grid' },
   { to: '/transactions', label: 'Transactions', icon: 'list' },
   { to: '/accounts', label: 'Accounts', icon: 'wallet' },
+  { to: '/projection', label: 'Projection', icon: 'trending' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -16,13 +16,10 @@ const isActive = (path: string) => {
   return route.path.startsWith(path)
 }
 
-const currentTime = computed(() => {
-  const now = new Date()
-  return now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  })
+const currentTime = new Date().toLocaleDateString('en-US', {
+  weekday: 'long',
+  month: 'long',
+  day: 'numeric',
 })
 </script>
 
@@ -77,6 +74,12 @@ const currentTime = computed(() => {
           <rect x="1" y="4" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
           <path d="M1 7h16" stroke="currentColor" stroke-width="1.5"/>
           <circle cx="13" cy="11" r="1.5" fill="currentColor"/>
+        </svg>
+        <svg v-else-if="link.icon === 'trending'" width="18" height="18" viewBox="0 0 18 18" fill="none"
+          :class="isActive(link.to) ? 'text-accent' : 'text-surface-400 group-hover:text-surface-500'"
+        >
+          <path d="M2 14l4-5 3 3 7-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 4h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <svg v-else-if="link.icon === 'settings'" width="18" height="18" viewBox="0 0 18 18" fill="none"
           :class="isActive(link.to) ? 'text-accent' : 'text-surface-400 group-hover:text-surface-500'"

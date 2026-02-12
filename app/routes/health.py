@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import Account, Credential, SyncLog
-from app.providers import list_providers
-from app.schemas import HealthResponse, ProviderStatusResponse, SyncError
+from app.routes.providers import get_provider_statuses
+from app.schemas import HealthResponse, SyncError
 
 router = APIRouter()
 
@@ -41,24 +41,7 @@ async def health_check(
     ]
 
     # Per-provider status
-    provider_statuses: list[ProviderStatusResponse] = []
-    for p in list_providers():
-        cred = await db.scalar(
-            select(Credential).where(Credential.provider == p.provider_name)
-        )
-        p_last_sync = await db.scalar(
-            select(SyncLog)
-            .where(SyncLog.provider == p.provider_name)
-            .order_by(SyncLog.started_at.desc())
-            .limit(1)
-        )
-        provider_statuses.append(ProviderStatusResponse(
-            provider=p.provider_name,
-            display_name=p.display_name,
-            connected=cred is not None,
-            last_sync_at=p_last_sync.started_at if p_last_sync else None,
-            last_sync_status=p_last_sync.status if p_last_sync else None,
-        ))
+    provider_statuses = await get_provider_statuses(db)
 
     # Check for security warnings
     warnings: list[str] = []

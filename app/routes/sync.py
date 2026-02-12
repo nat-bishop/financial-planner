@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -176,7 +176,7 @@ async def sync_status(
 
 @router.get("/logs", response_model=list[SyncResponse])
 async def sync_logs(
-    limit: int = 20,
+    limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> list[SyncLog]:
     """Get recent sync history."""

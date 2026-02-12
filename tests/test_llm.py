@@ -88,21 +88,18 @@ class TestCategorize:
                     TransactionCategorization(
                         id=txs[0].id,
                         category="Food & Dining",
-                        subcategory="Groceries",
                         confidence=0.95,
                         reasoning="Whole Foods is a grocery store",
                     ),
                     TransactionCategorization(
                         id=txs[1].id,
                         category="Transportation",
-                        subcategory="Gas",
                         confidence=0.90,
                         reasoning="Shell is a gas station",
                     ),
                     TransactionCategorization(
                         id=txs[2].id,
                         category="Shopping",
-                        subcategory="Online Shopping",
                         confidence=0.45,  # Below default 0.7 threshold
                         reasoning="Amazon sells many categories",
                     ),
@@ -127,7 +124,6 @@ class TestCategorize:
             # High confidence - applied
             assert results[txs[0].id]["category"] == "Food & Dining"
             assert results[txs[0].id]["applied"] is True
-            assert results[txs[0].id]["subcategory"] == "Groceries"
 
             # Low confidence - unable to categorize
             assert results[txs[2].id]["category"] == "Unable to Categorize"
@@ -151,7 +147,6 @@ class TestCategorize:
                     TransactionCategorization(
                         id=txs[0].id,
                         category="Food & Dining",
-                        subcategory="Groceries",
                         confidence=0.95,
                         reasoning="Re-categorized",
                     ),

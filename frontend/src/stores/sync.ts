@@ -27,6 +27,8 @@ export const useSyncStore = defineStore('sync', () => {
   const twoFaPending = computed(() => twoFaSyncId.value !== null)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let pollFailures = 0
+  const MAX_POLL_FAILURES = 5
 
   function isConnected(providerName: string): boolean {
     return providers.value.some(p => p.provider === providerName && p.connected)
@@ -109,6 +111,7 @@ export const useSyncStore = defineStore('sync', () => {
     const api = useApi()
     try {
       syncStatus.value = await api.get<SyncStatusResponse>('/sync/status')
+      pollFailures = 0
 
       // Check for 2FA
       const twoFaProvider = syncStatus.value.providers.find(
@@ -131,7 +134,11 @@ export const useSyncStore = defineStore('sync', () => {
         await fetchProviders()
       }
     } catch {
-      // Don't update error for poll failures
+      pollFailures++
+      if (pollFailures >= MAX_POLL_FAILURES) {
+        stopPolling()
+        syncing.value = false
+      }
     }
   }
 
@@ -166,6 +173,7 @@ export const useSyncStore = defineStore('sync', () => {
 
   function startPolling(): void {
     stopPolling()
+    pollFailures = 0
     pollTimer = setInterval(pollSyncStatus, 2000)
   }
 
@@ -193,6 +201,6 @@ export const useSyncStore = defineStore('sync', () => {
     fetchProviders, connectProvider, disconnectProvider,
     triggerSync, triggerProviderSync, pollSyncStatus,
     submit2FACode, dismiss2FA,
-    fetchHealth,
+    fetchHealth, stopPolling,
   }
 })

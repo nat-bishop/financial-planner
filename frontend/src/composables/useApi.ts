@@ -63,6 +63,29 @@ export function useApi() {
     }
   }
 
+  async function put<T>(path: string, body: any): Promise<T> {
+    loading.value = true
+    error.value = null
+
+    try {
+      const res = await fetch(BASE + path, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(parseDetail(data.detail, res.status))
+      }
+      return await res.json() as T
+    } catch (e: any) {
+      error.value = e.message
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function patch<T>(path: string, body: any): Promise<T> {
     loading.value = true
     error.value = null
@@ -105,7 +128,7 @@ export function useApi() {
     }
   }
 
-  return { loading, error, get, post, patch, del }
+  return { loading, error, get, post, put, patch, del }
 }
 
 /** Format cents as currency string */
@@ -139,12 +162,3 @@ export function formatRelative(timestamp: number | null | undefined): string {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
-/** Parse account type into display parts */
-export function parseAccountType(type: string | null): { type: string; subtype: string | null } {
-  if (!type) return { type: 'Unknown', subtype: null }
-  const parts = type.split('/')
-  return {
-    type: parts[0].charAt(0).toUpperCase() + parts[0].slice(1),
-    subtype: parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : null,
-  }
-}

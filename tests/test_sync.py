@@ -572,14 +572,12 @@ class TestTransactionUpdate:
 
         # Update category
         tx.category = "Food & Dining"
-        tx.subcategory = "Coffee Shops"
         tx.updated_at = int(time.time())
         await db.flush()
 
         # Verify
         updated_tx = await db.get(Transaction, tx.id)
         assert updated_tx.category == "Food & Dining"
-        assert updated_tx.subcategory == "Coffee Shops"
         assert updated_tx.updated_at is not None
 
 

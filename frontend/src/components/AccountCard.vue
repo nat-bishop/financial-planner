@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import type { Account } from '../types'
-import { formatCurrency, parseAccountType, formatRelative } from '../composables/useApi'
+import { formatCurrency, formatRelative } from '../composables/useApi'
 
 const props = defineProps<{
   account: Account
   compact?: boolean
 }>()
-
-const { type, subtype } = parseAccountType(props.account.account_type)
 </script>
 
 <template>
@@ -25,18 +23,6 @@ const { type, subtype } = parseAccountType(props.account.account_type)
           {{ account.name }}
         </h3>
       </div>
-      <span
-        class="shrink-0 ml-3 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider rounded-full border"
-        :class="{
-          'bg-info/8 text-info border-info/20': type === 'Depository',
-          'bg-expense/8 text-expense border-expense/20': type === 'Credit',
-          'bg-pending/8 text-pending border-pending/20': type === 'Loan',
-          'bg-income/8 text-income border-income/20': type === 'Investment',
-          'bg-surface-100 text-surface-500 border-surface-200': !['Depository','Credit','Loan','Investment'].includes(type),
-        }"
-      >
-        {{ subtype || type }}
-      </span>
     </div>
 
     <!-- Balance -->

@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import { useSyncStore } from '../stores/sync'
-import { useAccountsStore } from '../stores/accounts'
 
 const syncStore = useSyncStore()
-const accountsStore = useAccountsStore()
 
 async function handleSync() {
-  const result = await syncStore.triggerSync()
-  if (result) {
-    await accountsStore.fetch()
-  }
+  await syncStore.triggerSync()
 }
 </script>
 

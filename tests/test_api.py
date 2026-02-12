@@ -789,6 +789,68 @@ class TestAnalyticsEndpoint:
         assert categories["Food"]["total"] == 5000  # Only from enabled account
 
 
+class TestMonthlyTrendEndpoint:
+    @pytest.mark.asyncio
+    async def test_monthly_trend_basic(self, client, db):
+        """Monthly trend correctly buckets income and expenses by month."""
+        account = Account(id="act_1", provider="simplefin", name="Test")
+        db.add(account)
+
+        now = int(time.time())
+        jan = 1738368000  # 2025-02-01 approx
+        feb = 1740960000  # 2025-03-01 approx
+
+        db.add_all([
+            Transaction(account_id="act_1", external_id="tx1", posted_at=jan, amount=100000, description="Paycheck", category="Income"),
+            Transaction(account_id="act_1", external_id="tx2", posted_at=jan, amount=-5000, description="Coffee", category="Food"),
+            Transaction(account_id="act_1", external_id="tx3", posted_at=feb, amount=100000, description="Paycheck 2", category="Income"),
+            Transaction(account_id="act_1", external_id="tx4", posted_at=feb, amount=-8000, description="Lunch", category="Food"),
+            Transaction(account_id="act_1", external_id="tx5", posted_at=feb, amount=-3000, description="Gas", category="Transportation"),
+        ])
+        await db.commit()
+
+        response = await client.get("/analytics/monthly-trend", params={"months": 24})
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["months"]) == 2
+
+        # First month
+        m1 = data["months"][0]
+        assert m1["income"] == 100000
+        assert m1["expenses"] == 5000
+        assert m1["net"] == 95000
+        assert m1["transaction_count"] == 2
+
+        # Second month
+        m2 = data["months"][1]
+        assert m2["income"] == 100000
+        assert m2["expenses"] == 11000
+        assert m2["net"] == 89000
+        assert m2["transaction_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_monthly_trend_excludes_disabled(self, client, db):
+        """Monthly trend excludes disabled account transactions."""
+        db.add(Account(id="act_1", provider="simplefin", name="Visible"))
+        db.add(Account(id="act_2", provider="simplefin", name="Hidden", is_disabled=True))
+        now = int(time.time())
+        db.add(Transaction(account_id="act_1", external_id="tx1", posted_at=now, amount=-5000, description="A"))
+        db.add(Transaction(account_id="act_2", external_id="tx2", posted_at=now, amount=-3000, description="B"))
+        await db.commit()
+
+        response = await client.get("/analytics/monthly-trend")
+        data = response.json()
+        assert len(data["months"]) == 1
+        assert data["months"][0]["expenses"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_monthly_trend_empty(self, client):
+        """Monthly trend returns empty list when no transactions."""
+        response = await client.get("/analytics/monthly-trend")
+        assert response.status_code == 200
+        assert response.json()["months"] == []
+
+
 class TestCategorizeEndpoint:
     @pytest.mark.asyncio
     async def test_categorize_no_categories_guard(self, client, db):
@@ -862,7 +924,7 @@ class TestCategoryMemory:
 
         response = await client.patch(
             f"/transactions/{tx.id}",
-            json={"category": "Housing", "subcategory": "Rent"},
+            json={"category": "Housing"},
         )
         assert response.status_code == 200
         assert response.json()["category"] == "Housing"
@@ -878,7 +940,6 @@ class TestCategoryMemory:
         )
         assert result is not None
         assert result.category == "Housing"
-        assert result.subcategory == "Rent"
 
     @pytest.mark.asyncio
     async def test_user_correction_overwrites_existing_entry(self, client, db):
@@ -895,14 +956,13 @@ class TestCategoryMemory:
             normalized_pattern="bilt payment",
             account_id="act_1",
             category="Bills",
-            subcategory=None,
         ))
         await db.commit()
 
         # User corrects to Housing
         response = await client.patch(
             f"/transactions/{tx.id}",
-            json={"category": "Housing", "subcategory": "Rent"},
+            json={"category": "Housing"},
         )
         assert response.status_code == 200
 
@@ -914,7 +974,6 @@ class TestCategoryMemory:
             )
         )
         assert result.category == "Housing"
-        assert result.subcategory == "Rent"
 
     @pytest.mark.asyncio
     async def test_uncategorized_deletes_memory_entry(self, client, db):
@@ -959,7 +1018,6 @@ class TestCategoryMemory:
             normalized_pattern="bilt payment",
             account_id="act_1",
             category="Housing",
-            subcategory="Rent",
         ))
         db.add(Transaction(
             account_id="act_1", external_id="tx1",
@@ -1007,7 +1065,6 @@ class TestCategoryMemory:
             TransactionCategorization(
                 id=tx.id,
                 category="Food & Dining",
-                subcategory="Coffee",
                 confidence=0.95,
                 reasoning="Coffee shop purchase",
             ),
@@ -1034,7 +1091,6 @@ class TestCategoryMemory:
         )
         assert result is not None
         assert result.category == "Food & Dining"
-        assert result.subcategory == "Coffee"
 
         del app.dependency_overrides[_get_client]
 
@@ -1054,7 +1110,6 @@ class TestCategoryMemory:
             normalized_pattern="sq *joes coffee",
             account_id="act_1",
             category="Shopping",
-            subcategory="Office Supplies",
         ))
         tx = Transaction(
             account_id="act_1", external_id="tx1",
@@ -1069,7 +1124,6 @@ class TestCategoryMemory:
             TransactionCategorization(
                 id=tx.id,
                 category="Food & Dining",
-                subcategory="Coffee",
                 confidence=0.95,
                 reasoning="Coffee shop",
             ),
@@ -1138,7 +1192,7 @@ class TestCategoryMemory:
 
         mock_response = BatchCategorizationResponse(transactions=[
             TransactionCategorization(
-                id=tx1.id, category="Food & Dining", subcategory="Coffee",
+                id=tx1.id, category="Food & Dining",
                 confidence=0.95, reasoning="Coffee",
             ),
         ])
@@ -1241,7 +1295,6 @@ class TestSyncAutoApplyMemory:
             normalized_pattern="bilt payment",
             account_id="act_1",
             category="Housing",
-            subcategory="Rent",
         ))
         await db.commit()
 
@@ -1280,7 +1333,6 @@ class TestSyncAutoApplyMemory:
         txns = tx_response.json()["transactions"]
         assert len(txns) == 1
         assert txns[0]["category"] == "Housing"
-        assert txns[0]["subcategory"] == "Rent"
         assert txns[0]["categorize_confidence"] is None
 
     @pytest.mark.asyncio
@@ -1364,7 +1416,6 @@ class TestPromptMemoryContext:
             normalized_pattern="bilt payment",
             account_id="act_1",
             category="Housing",
-            subcategory="Rent",
         ))
         # Transaction that won't match memory (different description)
         tx = Transaction(
@@ -1395,7 +1446,6 @@ class TestPromptMemoryContext:
         full_prompt = system_prompt + user_prompt
         assert "bilt payment" in full_prompt
         assert "Housing" in full_prompt
-        assert "Rent" in full_prompt
         assert "Chase Checking" in full_prompt
 
         del app.dependency_overrides[_get_client]

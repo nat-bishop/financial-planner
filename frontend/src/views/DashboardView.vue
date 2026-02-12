@@ -1,29 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { useAccountsStore } from '../stores/accounts'
-import { useTransactionsStore } from '../stores/transactions'
 import { useSyncStore } from '../stores/sync'
 import AccountCard from '../components/AccountCard.vue'
-import TransactionTable from '../components/TransactionTable.vue'
+import MonthlyTrendChart from '../components/MonthlyTrendChart.vue'
 import SpendingChart from '../components/SpendingChart.vue'
+import BillCalendar from '../components/BillCalendar.vue'
 import SyncButton from '../components/SyncButton.vue'
 import { formatCurrency, formatRelative } from '../composables/useApi'
 
 const accountsStore = useAccountsStore()
-const transactionsStore = useTransactionsStore()
 const syncStore = useSyncStore()
 
 onMounted(async () => {
   await Promise.all([
     accountsStore.fetch(),
-    transactionsStore.fetchRecent(10),
     syncStore.fetchHealth(),
   ])
 })
-
-function handleTransactionUpdate(id: number, data: any) {
-  transactionsStore.updateTransaction(id, data)
-}
 </script>
 
 <template>
@@ -73,9 +67,21 @@ function handleTransactionUpdate(id: number, data: any) {
       </div>
     </div>
 
-    <!-- Two column: chart + recent transactions -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <!-- Spending Chart -->
+    <!-- Monthly Trend (full width) -->
+    <div v-if="accountsStore.accounts.length > 0" class="mb-10">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xs font-mono uppercase tracking-widest text-surface-400">
+          Monthly Income &amp; Expenses
+        </h2>
+        <span class="text-[10px] font-mono text-surface-300">Last 12 months</span>
+      </div>
+      <div class="bg-white border border-surface-900/8 rounded-2xl p-6">
+        <MonthlyTrendChart />
+      </div>
+    </div>
+
+    <!-- Two column: Spending Chart + Upcoming Bills -->
+    <div v-if="accountsStore.accounts.length > 0" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <div>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-xs font-mono uppercase tracking-widest text-surface-400">
@@ -88,22 +94,14 @@ function handleTransactionUpdate(id: number, data: any) {
         </div>
       </div>
 
-      <!-- Recent Transactions -->
       <div>
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-xs font-mono uppercase tracking-widest text-surface-400">
-            Recent Transactions
+            Upcoming Bills
           </h2>
-          <router-link to="/transactions" class="text-xs text-surface-400 hover:text-surface-200 transition-colors">
-            View all &rarr;
-          </router-link>
         </div>
         <div class="bg-white border border-surface-900/8 rounded-2xl p-6">
-          <TransactionTable
-            :transactions="transactionsStore.transactions"
-            :loading="transactionsStore.loading"
-            compact
-          />
+          <BillCalendar />
         </div>
       </div>
     </div>
@@ -123,7 +121,7 @@ function handleTransactionUpdate(id: number, data: any) {
         Connect your bank accounts to start tracking your finances.
       </p>
       <router-link
-        to="/accounts"
+        to="/settings"
         class="inline-flex items-center gap-2 px-5 py-2.5 bg-surface-0 text-surface-900 text-sm font-medium rounded-xl hover:bg-surface-100 transition-colors"
       >
         Connect Accounts &rarr;

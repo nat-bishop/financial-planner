@@ -12,6 +12,10 @@ from app.core.config import settings
 from app.core.database import async_session_maker, engine
 from app.routes import router
 
+# Ensure app-level loggers output to console
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
+
 log = logging.getLogger(__name__)
 
 

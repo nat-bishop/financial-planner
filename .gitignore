@@ -55,5 +55,9 @@ dist/
 # Logs
 *.log
 
+# Scratch / live test files
+output.py
+*_live.py
+
 # Claude Code (track agents and settings, ignore local settings)
 .claude/settings.local.json

@@ -34,6 +34,19 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
+  async function update(id: number, data: { exclude_from_totals?: boolean; description?: string }): Promise<boolean> {
+    const api = useApi()
+    try {
+      const updated = await api.patch<Category>(`/categories/${id}`, data)
+      const idx = categories.value.findIndex(c => c.id === id)
+      if (idx !== -1) categories.value[idx] = updated
+      return true
+    } catch (e: any) {
+      error.value = e.message
+      return false
+    }
+  }
+
   async function remove(id: number): Promise<boolean> {
     const api = useApi()
     try {
@@ -46,5 +59,5 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
-  return { categories, loading, error, fetch, create, remove }
+  return { categories, loading, error, fetch, create, update, remove }
 })

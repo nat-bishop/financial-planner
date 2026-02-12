@@ -7,9 +7,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# Install Playwright Chromium browser binary + OS-level dependencies
-RUN uv run playwright install-deps chromium
-RUN uv run playwright install chromium
+# Install Playwright Chrome browser + OS-level dependencies
+# Chrome (not Chromium) is required to bypass Akamai bot detection on Nelnet
+RUN uv run playwright install-deps chrome
+RUN uv run playwright install chrome
 
 COPY alembic.ini ./
 COPY alembic/ ./alembic/

@@ -174,14 +174,12 @@ async def update_transaction(
                     normalized_pattern=pattern,
                     account_id=transaction.account_id,
                     category=new_category,
-                    subcategory=update_data.get("subcategory"),
                     created_at=now,
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["normalized_pattern", "account_id"],
                     set_={
                         "category": stmt.excluded.category,
-                        "subcategory": stmt.excluded.subcategory,
                         "updated_at": now,
                     },
                 )

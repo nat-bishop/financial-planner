@@ -10,18 +10,23 @@ Categories:
 {% for cat in categories -%}
 - {{ cat.name }}{% if cat.description %}: {{ cat.description }}{% endif %}
 {% endfor %}
+Special categorization rules:
+- "From/To [account]", "Online Transfer" between the user's own accounts = Transfers
+- "AMEX EPAYMENT", "CHASE CREDIT CRD", and similar credit card bill payments = Transfers
+- Zelle/Venmo: categorize by PURPOSE, not payment method. Zelle for dinner = Dining & Drinks. Zelle to family = Gifts & Donations. Only use Transfers if genuinely moving money.
+- Insurance: categorize by what it insures (health → Health & Medical, renters → Housing, auto → Transportation)
+- Subscriptions: categorize by purpose (Netflix → Entertainment, internet → Utilities)
+
 {% if memory_entries %}
 The user has established these categorization preferences:
 {% for entry in memory_entries -%}
-- "{{ entry.pattern }}" ({{ entry.account_name }}) → {{ entry.category }}{% if entry.subcategory %} > {{ entry.subcategory }}{% endif %}
+- "{{ entry.pattern }}" ({{ entry.account_name }}) → {{ entry.category }}
 {% endfor %}
 Apply these preferences to similar transactions.
 
 {% endif %}
 For each transaction return:
 - category: exactly one category name from the list above
-- subcategory: a more specific label within the category (e.g., "Groceries"
-  within "Food & Dining", "Gas" within "Transportation"). Null if not applicable.
 - confidence: 0.0 to 1.0
 - reasoning: one sentence explaining your choice
 ---

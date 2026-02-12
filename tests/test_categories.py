@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from app.models import Category, Transaction
+from app.models import Account, Category, Transaction
 
 
 class TestCategoryEndpoints:
@@ -102,3 +102,80 @@ class TestCategoryEndpoints:
         txns = resp.json()["transactions"]
         assert len(txns) == 1
         assert txns[0]["category"] == "Uncategorized"
+
+    @pytest.mark.asyncio
+    async def test_patch_category_exclude_from_totals(self, client, db):
+        """PATCH /categories/{id} toggles exclude_from_totals."""
+        cat = Category(name="Transfers", is_default=True, created_at=int(time.time()))
+        db.add(cat)
+        await db.flush()
+
+        # Toggle on
+        resp = await client.patch(
+            f"/categories/{cat.id}",
+            json={"exclude_from_totals": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["exclude_from_totals"] is True
+
+        # Toggle off
+        resp = await client.patch(
+            f"/categories/{cat.id}",
+            json={"exclude_from_totals": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["exclude_from_totals"] is False
+
+    @pytest.mark.asyncio
+    async def test_patch_category_not_found(self, client):
+        """PATCH /categories/999 returns 404."""
+        resp = await client.patch(
+            "/categories/999",
+            json={"exclude_from_totals": True},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_patch_category_description(self, client):
+        """PATCH can update description."""
+        create_resp = await client.post(
+            "/categories/", json={"name": "Custom"},
+        )
+        cat_id = create_resp.json()["id"]
+
+        resp = await client.patch(
+            f"/categories/{cat_id}",
+            json={"description": "Updated description"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["description"] == "Updated description"
+
+
+class TestAccountOrdering:
+    @pytest.mark.asyncio
+    async def test_accounts_sorted_by_absolute_balance(self, client, db):
+        """Accounts are returned sorted by absolute balance descending."""
+        now = int(time.time())
+        db.add(Account(id="small", provider="simplefin", name="Small", balance_current=1000, created_at=now))
+        db.add(Account(id="big_neg", provider="simplefin", name="Big Loan", balance_current=-50000, created_at=now))
+        db.add(Account(id="big_pos", provider="simplefin", name="Savings", balance_current=40000, created_at=now))
+        db.add(Account(id="zero", provider="simplefin", name="Empty", balance_current=0, created_at=now))
+        await db.commit()
+
+        resp = await client.get("/accounts/")
+        assert resp.status_code == 200
+        ids = [a["id"] for a in resp.json()]
+        # Big loan (-50000), Savings (40000), Small (1000), Empty (0)
+        assert ids == ["big_neg", "big_pos", "small", "zero"]
+
+    @pytest.mark.asyncio
+    async def test_accounts_null_balance_sorted_last(self, client, db):
+        """Accounts with null balance sort after accounts with balance."""
+        now = int(time.time())
+        db.add(Account(id="has_balance", provider="simplefin", name="Has", balance_current=5000, created_at=now))
+        db.add(Account(id="no_balance", provider="simplefin", name="None", balance_current=None, created_at=now))
+        await db.commit()
+
+        resp = await client.get("/accounts/")
+        ids = [a["id"] for a in resp.json()]
+        assert ids == ["has_balance", "no_balance"]

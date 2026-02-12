@@ -34,36 +34,35 @@ CREDENTIAL_SCHEMAS: dict[str, type] = {
 }
 
 
-@router.get("/", response_model=list[ProviderStatusResponse])
-async def list_provider_status(
-    db: AsyncSession = Depends(get_db),
-) -> list[ProviderStatusResponse]:
-    """List all providers with connection status."""
-    providers = list_providers()
-    result: list[ProviderStatusResponse] = []
-
-    for p in providers:
-        # Check if connected
+async def get_provider_statuses(db: AsyncSession) -> list[ProviderStatusResponse]:
+    """Build provider status list (shared by health and providers endpoints)."""
+    statuses: list[ProviderStatusResponse] = []
+    for p in list_providers():
         cred = await db.scalar(
             select(Credential).where(Credential.provider == p.provider_name)
         )
-        # Get last sync
         last_sync = await db.scalar(
             select(SyncLog)
             .where(SyncLog.provider == p.provider_name)
             .order_by(SyncLog.started_at.desc())
             .limit(1)
         )
-
-        result.append(ProviderStatusResponse(
+        statuses.append(ProviderStatusResponse(
             provider=p.provider_name,
             display_name=p.display_name,
             connected=cred is not None,
             last_sync_at=last_sync.started_at if last_sync else None,
             last_sync_status=last_sync.status if last_sync else None,
         ))
+    return statuses
 
-    return result
+
+@router.get("/", response_model=list[ProviderStatusResponse])
+async def list_provider_status(
+    db: AsyncSession = Depends(get_db),
+) -> list[ProviderStatusResponse]:
+    """List all providers with connection status."""
+    return await get_provider_statuses(db)
 
 
 @router.post("/{name}/credentials", response_model=CredentialResponse)

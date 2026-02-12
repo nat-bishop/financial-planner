@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -56,7 +58,6 @@ class TransactionResponse(BaseModel):
     description: str
     is_pending: bool
     category: str
-    subcategory: str | None
     categorize_confidence: float | None
     tags: str | None
     notes: str | None
@@ -78,7 +79,6 @@ class TransactionIdsResponse(BaseModel):
 
 class TransactionUpdate(BaseModel):
     category: str | None = None
-    subcategory: str | None = None
     tags: str | None = None  # JSON array as string
     notes: str | None = None
 
@@ -157,10 +157,69 @@ class HealthResponse(BaseModel):
 
 
 # Analytics
+class IncomeSource(BaseModel):
+    name: str
+    monthly_amount: int  # cents
+
+
+class ProjectionPoint(BaseModel):
+    year: int
+    balance: int  # cents
+    contributions: int  # cents (principal only, no growth)
+
+
+class ProjectionBand(BaseModel):
+    label: str
+    annual_return: float
+    points: list[ProjectionPoint]
+
+
+class IncomeProjectionResponse(BaseModel):
+    monthly_income: int  # cents
+    monthly_expenses: int  # cents
+    monthly_contribution: int  # cents
+    income_sources: list[IncomeSource]
+    bands: list[ProjectionBand]
+    time_horizon_years: int
+    is_configured: bool
+
+
+class RecurringBill(BaseModel):
+    description: str
+    raw_description: str
+    account_id: str
+    account_name: str
+    frequency: str
+    median_amount: int  # cents, positive absolute
+    last_occurrence: int  # Unix timestamp
+    predicted_next: int  # Unix timestamp
+    occurrence_count: int
+    confidence: float  # 0-1
+
+
+class RecurringBillsResponse(BaseModel):
+    bills: list[RecurringBill]
+    lookback_months: int
+
+
+class MonthlyBucket(BaseModel):
+    month: str  # "2026-01"
+    month_start: int  # Unix timestamp of first day of month
+    income: int  # cents (positive)
+    expenses: int  # cents (positive absolute value)
+    net: int  # income - expenses
+    transaction_count: int
+
+
+class MonthlyTrendResponse(BaseModel):
+    months: list[MonthlyBucket]
+
+
 class SpendingByCategory(BaseModel):
     category: str | None
     total: int  # cents
     count: int
+    exclude_from_totals: bool = False
 
 
 class SpendingByCategoryResponse(BaseModel):
@@ -173,6 +232,12 @@ class SpendingByCategoryResponse(BaseModel):
 class CategoryCreate(BaseModel):
     name: str
     description: str | None = None
+    exclude_from_totals: bool = False
+
+
+class CategoryUpdate(BaseModel):
+    exclude_from_totals: bool | None = None
+    description: str | None = None
 
 
 class CategoryResponse(BaseModel):
@@ -182,6 +247,7 @@ class CategoryResponse(BaseModel):
     name: str
     description: str | None
     is_default: bool
+    exclude_from_totals: bool
     created_at: int
 
 
@@ -195,7 +261,6 @@ class TransactionCategorization(BaseModel):
 
     id: int
     category: str
-    subcategory: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
 
@@ -211,7 +276,6 @@ class CategorizeResult(BaseModel):
     description: str
     category: str
     suggested_category: str
-    subcategory: str | None
     confidence: float
     reasoning: str
     applied: bool
@@ -249,5 +313,15 @@ class TwoFAStatusResponse(BaseModel):
     methods_available: list[str]
     attempts: int
     max_attempts: int
+
+
+# Settings
+class SettingValue(BaseModel):
+    value: Any
+
+
+class SettingResponse(BaseModel):
+    key: str
+    value: Any
 
 

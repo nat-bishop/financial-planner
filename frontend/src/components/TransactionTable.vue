@@ -32,7 +32,6 @@ const accountMap = computed(() => {
 
 const expandedId = ref<number | null>(null)
 const editCategory = ref('')
-const editSubcategory = ref('')
 const editNotes = ref('')
 
 function toggleExpand(tx: Transaction) {
@@ -41,7 +40,6 @@ function toggleExpand(tx: Transaction) {
   } else {
     expandedId.value = tx.id
     editCategory.value = tx.category
-    editSubcategory.value = tx.subcategory || ''
     editNotes.value = tx.notes || ''
   }
 }
@@ -49,7 +47,6 @@ function toggleExpand(tx: Transaction) {
 function saveEdit(tx: Transaction) {
   const data: TransactionUpdate = {}
   if (editCategory.value !== tx.category) data.category = editCategory.value || null
-  if (editSubcategory.value !== (tx.subcategory || '')) data.subcategory = editSubcategory.value || null
   if (editNotes.value !== (tx.notes || '')) data.notes = editNotes.value || null
   if (Object.keys(data).length > 0) {
     emit('update', tx.id, data)
@@ -142,7 +139,6 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
               class="pb-3 text-[11px] font-mono uppercase tracking-wider text-surface-400 font-medium cursor-pointer hover:text-surface-200 select-none"
               @click="emit('sort', 'category')"
             >Category{{ sortArrow('category') }}</th>
-            <th class="pb-3 text-[11px] font-mono uppercase tracking-wider text-surface-400 font-medium">Subcategory</th>
             <th
               class="pb-3 text-[11px] font-mono uppercase tracking-wider text-surface-400 font-medium text-right cursor-pointer hover:text-surface-200 select-none"
               @click="emit('sort', 'amount')"
@@ -217,11 +213,6 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
                   </span>
                 </div>
               </td>
-              <td v-if="!compact" class="py-3 pr-4 w-28">
-                <span class="text-xs text-surface-400 truncate block max-w-[100px]">
-                  {{ tx.subcategory || '--' }}
-                </span>
-              </td>
               <td class="py-3 text-right">
                 <span
                   class="text-sm font-mono tabular-nums font-medium"
@@ -233,7 +224,7 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
             </tr>
             <!-- Expanded detail row -->
             <tr v-if="!compact && expandedId === tx.id" class="border-b border-surface-900/4">
-              <td :colspan="selectable ? 8 : 7" class="px-4 py-4 bg-surface-900/[0.02]">
+              <td :colspan="selectable ? 7 : 6" class="px-4 py-4 bg-surface-900/[0.02]">
                 <div class="max-w-xl" @click.stop>
                   <!-- Read-only transaction metadata -->
                   <div
@@ -256,7 +247,7 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
                     </template>
                   </div>
                   <!-- Editable fields -->
-                  <div class="grid grid-cols-2 gap-4">
+                  <div class="grid gap-4">
                   <div>
                     <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Category</label>
                     <input
@@ -265,13 +256,6 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
                     />
                   </div>
                   <div>
-                    <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Subcategory</label>
-                    <input
-                      v-model="editSubcategory"
-                      class="text-xs px-2 py-1.5 bg-white border border-surface-900/10 rounded-md w-full outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
-                    />
-                  </div>
-                  <div class="col-span-2">
                     <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Notes</label>
                     <textarea
                       v-model="editNotes"
@@ -279,7 +263,7 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
                       class="text-xs px-2 py-1.5 bg-white border border-surface-900/10 rounded-md w-full outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 resize-none"
                     ></textarea>
                   </div>
-                  <div class="col-span-2 flex items-center gap-3">
+                  <div class="flex items-center gap-3">
                     <button
                       @click="saveEdit(tx)"
                       class="px-3 py-1.5 text-xs font-medium bg-accent/10 text-accent hover:bg-accent/20 rounded-lg transition-colors"

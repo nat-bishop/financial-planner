@@ -23,7 +23,6 @@ export interface Transaction {
   description: string
   is_pending: boolean
   category: string
-  subcategory: string | null
   categorize_confidence: number | null
   tags: string | null
   notes: string | null
@@ -34,7 +33,6 @@ export interface Transaction {
 
 export interface TransactionUpdate {
   category?: string | null
-  subcategory?: string | null
   tags?: string | null
   notes?: string | null
 }
@@ -60,6 +58,8 @@ export interface SyncLog {
   transactions_added: number
   transactions_updated: number
   error_message: string | null
+  two_fa_status: string | null
+  two_fa_method: string | null
 }
 
 export interface SyncTriggerResponse {
@@ -97,10 +97,69 @@ export interface ProviderStatus {
   last_sync_status: string | null
 }
 
+export interface IncomeSource {
+  name: string
+  monthly_amount: number
+}
+
+export interface ProjectionPoint {
+  year: number
+  balance: number
+  contributions: number
+}
+
+export interface ProjectionBand {
+  label: string
+  annual_return: number
+  points: ProjectionPoint[]
+}
+
+export interface IncomeProjectionResponse {
+  monthly_income: number
+  monthly_expenses: number
+  monthly_contribution: number
+  income_sources: IncomeSource[]
+  bands: ProjectionBand[]
+  time_horizon_years: number
+  is_configured: boolean
+}
+
+export interface RecurringBill {
+  description: string
+  raw_description: string
+  account_id: string
+  account_name: string
+  frequency: string
+  median_amount: number
+  last_occurrence: number
+  predicted_next: number
+  occurrence_count: number
+  confidence: number
+}
+
+export interface RecurringBillsResponse {
+  bills: RecurringBill[]
+  lookback_months: number
+}
+
+export interface MonthlyBucket {
+  month: string
+  month_start: number
+  income: number
+  expenses: number
+  net: number
+  transaction_count: number
+}
+
+export interface MonthlyTrendResponse {
+  months: MonthlyBucket[]
+}
+
 export interface SpendingCategory {
   category: string | null
   total: number
   count: number
+  exclude_from_totals: boolean
 }
 
 export interface SpendingByCategoryResponse {
@@ -117,6 +176,7 @@ export interface HealthResponse {
   last_sync_status: string | null
   account_count: number
   recent_errors: { at: number; message: string | null }[]
+  warnings: string[]
 }
 
 export interface TransactionFilters {
@@ -136,6 +196,7 @@ export interface Category {
   name: string
   description: string | null
   is_default: boolean
+  exclude_from_totals: boolean
   created_at: number
 }
 
@@ -149,7 +210,6 @@ export interface CategorizeResult {
   description: string
   category: string
   suggested_category: string
-  subcategory: string | null
   confidence: number
   reasoning: string
   applied: boolean
@@ -159,6 +219,7 @@ export interface CategorizeResponse {
   total_processed: number
   categorized: number
   unable_to_categorize: number
+  memory_matched: number
   results: CategorizeResult[]
   error: string | null
 }

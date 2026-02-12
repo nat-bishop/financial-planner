@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -17,7 +17,9 @@ async def list_accounts(
     db: AsyncSession = Depends(get_db),
 ) -> list[Account]:
     """List all synced accounts."""
-    query = select(Account).order_by(Account.name)
+    query = select(Account).order_by(
+        func.abs(func.coalesce(Account.balance_current, 0)).desc()
+    )
     if not include_disabled:
         query = query.where(Account.is_disabled == False)  # noqa: E712
     result = await db.scalars(query.offset(offset).limit(limit))

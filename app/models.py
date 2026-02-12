@@ -83,7 +83,6 @@ class Transaction(Base):
 
     # Enrichment (app-managed)
     category: Mapped[str] = mapped_column(String, nullable=False, default="Uncategorized", server_default="Uncategorized", index=True)
-    subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
     categorize_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -128,6 +127,7 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    exclude_from_totals: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
 
 
@@ -147,9 +147,18 @@ class CategoryMemory(Base):
     normalized_pattern: Mapped[str] = mapped_column(Text, nullable=False)
     account_id: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
-    subcategory: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
     updated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class UserSetting(Base):
+    """Key-value settings store for user preferences."""
+
+    __tablename__ = "user_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON-encoded
+    updated_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()))
 
 
 def normalize_description(description: str) -> str:

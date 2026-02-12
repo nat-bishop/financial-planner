@@ -42,9 +42,7 @@ _ONE_DAY = 86400
 
 
 def _get_lock(provider_name: str) -> asyncio.Lock:
-    if provider_name not in _sync_locks:
-        _sync_locks[provider_name] = asyncio.Lock()
-    return _sync_locks[provider_name]
+    return _sync_locks.setdefault(provider_name, asyncio.Lock())
 
 
 async def get_connected_providers(db: AsyncSession) -> list[str]:
@@ -139,6 +137,9 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
     """Background task that runs a provider sync with its own DB session.
 
     Handles locking, timeouts, 2FA relay, and error recovery.
+
+    Uses asyncio.wait instead of wait_for because Playwright coroutines
+    don't respond to CancelledError, causing wait_for to hang forever.
     """
     provider = get_provider(provider_name)
     lock = _get_lock(provider_name)
@@ -158,20 +159,28 @@ async def _background_sync(provider_name: str, sync_log_id: int) -> None:
                 # Build 2FA handler closure
                 handler = _build_2fa_handler(db, sync_log, provider_name)
 
-                try:
-                    await asyncio.wait_for(
-                        _run_sync(db, provider, sync_log, two_fa_handler=handler),
-                        timeout=timeout,
-                    )
-                except TimeoutError:
+                sync_task = asyncio.create_task(
+                    _run_sync(db, provider, sync_log, two_fa_handler=handler),
+                    name=f"run-sync-{provider_name}",
+                )
+                done, _ = await asyncio.wait({sync_task}, timeout=timeout)
+
+                if sync_task in done:
+                    # Task completed — re-raise any exception
+                    exc = sync_task.exception()
+                    if exc is not None:
+                        if isinstance(exc, TwoFATimeoutError):
+                            _fail_sync_log(sync_log, str(exc), two_fa_status="timed_out")
+                        elif isinstance(exc, ProviderError):
+                            _fail_sync_log(sync_log, str(exc))
+                        else:
+                            log.error("Background sync failed for %s: %s", provider_name, exc)
+                            _fail_sync_log(sync_log, str(exc))
+                else:
+                    # Timeout — abandon the task and fail the sync log
+                    log.error("Sync timed out after %ds for %s", timeout, provider_name)
                     _fail_sync_log(sync_log, f"Sync timed out after {timeout}s")
-                except TwoFATimeoutError as e:
-                    _fail_sync_log(sync_log, str(e), two_fa_status="timed_out")
-                except ProviderError as e:
-                    _fail_sync_log(sync_log, str(e))
-                except Exception as e:
-                    log.error("Background sync failed for %s: %s", provider_name, e)
-                    _fail_sync_log(sync_log, str(e))
+                    sync_task.cancel()
 
                 await db.commit()
         except Exception as e:
@@ -230,12 +239,7 @@ def _build_2fa_handler(
             await db.commit()
             return code
         except TwoFATimeoutError:
-            sync_log.status = "failed"
-            sync_log.two_fa_status = "timed_out"
-            sync_log.error_message = "2FA code not provided in time"
-            sync_log.completed_at = int(time.time())
-            await db.commit()
-            raise
+            raise  # Let _background_sync handle the status update
 
     return handler
 

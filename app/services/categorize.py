@@ -93,7 +93,6 @@ async def apply_memory_rules(
         memory = memory_entries.get(key)
         if memory:
             tx.category = memory.category
-            tx.subcategory = memory.subcategory
             tx.categorize_confidence = None  # Memory match, not LLM
             tx.updated_at = now
             matched.append(tx)
@@ -119,7 +118,6 @@ async def cache_llm_results(
                 normalized_pattern=pattern,
                 account_id=tx.account_id,
                 category=tx.category,
-                subcategory=tx.subcategory,
                 created_at=now,
             )
             stmt = stmt.on_conflict_do_nothing(
@@ -159,7 +157,6 @@ async def _fetch_memory_context(
             "pattern": e.normalized_pattern,
             "account_name": acct_names.get(e.account_id, "Unknown"),
             "category": e.category,
-            "subcategory": e.subcategory,
         }
         for e in entries
     ]
@@ -210,7 +207,6 @@ async def categorize_transactions(
             description=tx.description,
             category=tx.category,
             suggested_category=tx.category,
-            subcategory=tx.subcategory,
             confidence=1.0,
             reasoning="Matched from category memory",
             applied=True,
@@ -276,13 +272,11 @@ async def categorize_transactions(
                 applied = item.confidence >= threshold
                 if applied:
                     tx.category = item.category
-                    tx.subcategory = item.subcategory
                     tx.categorize_confidence = item.confidence
                     categorized_count += 1
                     llm_categorized.append(tx)
                 else:
                     tx.category = UNABLE_TO_CATEGORIZE
-                    tx.subcategory = None
                     tx.categorize_confidence = item.confidence
                     unable_count += 1
 
@@ -294,7 +288,6 @@ async def categorize_transactions(
                         description=tx.description,
                         category=tx.category,
                         suggested_category=item.category,
-                        subcategory=item.subcategory,
                         confidence=item.confidence,
                         reasoning=item.reasoning,
                         applied=applied,
