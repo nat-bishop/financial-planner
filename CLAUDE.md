@@ -116,6 +116,7 @@ app/
 
 ### Docker & Infrastructure
 - **Primary workflow:** `make start` / `make stop`. Runs via Docker Compose.
+- **Playwright in Docker:** Dockerfile installs Chromium binary + OS deps (`playwright install-deps chromium` + `playwright install chromium`). All providers (including browser-based Nelnet) work in Docker.
 - **Port configuration:** `BACKEND_PORT` and `FRONTEND_PORT` in `.env`, referenced in `docker-compose.yml` via `${VAR:-default}` interpolation.
 - **Health check:** Backend exposes `GET /health` (queries DB). Docker Compose uses it with `condition: service_healthy` so frontend waits for backend readiness.
 - **Hot reload:** Source volumes mounted (`./app`, `./frontend/src`) for live reload in containers.

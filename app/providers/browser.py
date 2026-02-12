@@ -61,10 +61,13 @@ class BrowserProvider(FinanceProvider):
             headless = settings.browser_headless
 
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        launch_args: dict = {
+            "headless": headless,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        if settings.browser_channel:
+            launch_args["channel"] = settings.browser_channel
+        browser = await pw.chromium.launch(**launch_args)
         try:
             ctx_args: dict = {
                 "viewport": {

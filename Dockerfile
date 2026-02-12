@@ -7,6 +7,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+# Install Playwright Chromium browser binary + OS-level dependencies
+RUN uv run playwright install-deps chromium
+RUN uv run playwright install chromium
+
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 COPY app/ ./app/

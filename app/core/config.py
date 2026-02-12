@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Browser provider
+    browser_channel: str = "chrome"  # "chrome", "msedge", or "" for bundled Chromium
     browser_headless: bool = True
     browser_viewport_width: int = 1280
     browser_viewport_height: int = 800
