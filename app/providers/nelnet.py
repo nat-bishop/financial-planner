@@ -536,7 +536,7 @@ def _to_provider_accounts(
             id=_stable_id("nelnet", "account", a.group_name),
             name=f"Nelnet {a.group_name} - {a.loan_type}",
             currency="USD",
-            balance_current=_parse_currency(a.outstanding_balance),
+            balance_current=-abs(_parse_currency(a.outstanding_balance)),
             account_type="loan/student",
         )
         for a in scraped

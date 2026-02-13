@@ -50,5 +50,6 @@ async def categorize(
 
     try:
         return await categorize_transactions(db, client, transaction_ids)
-    except RuntimeError as e:
+    except Exception as e:
+        log.error("Categorization failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from None

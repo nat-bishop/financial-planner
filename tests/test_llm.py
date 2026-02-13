@@ -206,6 +206,50 @@ class TestCategorize:
             app.dependency_overrides.pop(_get_client, None)
 
 
+class TestCategorizeErrors:
+    @pytest.mark.asyncio
+    async def test_categorize_gemini_api_error(self, client, db):
+        """Gemini API errors return 500 with descriptive message."""
+        _seed_categories(db)
+        _seed_transactions(db)
+        await db.flush()
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(
+            side_effect=RuntimeError("Gemini API error: 429 RESOURCE_EXHAUSTED")
+        )
+
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        try:
+            resp = await client.post("/llm/categorize")
+            assert resp.status_code == 500
+            assert "Gemini API error" in resp.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(_get_client, None)
+
+    @pytest.mark.asyncio
+    async def test_categorize_unexpected_error(self, client, db):
+        """Unexpected errors return 500 with detail, not raw crash."""
+        _seed_categories(db)
+        _seed_transactions(db)
+        await db.flush()
+
+        mock_client = AsyncMock(spec=GeminiClient)
+        mock_client.generate_structured = AsyncMock(
+            side_effect=ConnectionError("Network unreachable")
+        )
+
+        app.dependency_overrides[_get_client] = lambda: mock_client
+
+        try:
+            resp = await client.post("/llm/categorize")
+            assert resp.status_code == 500
+            assert "Network unreachable" in resp.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(_get_client, None)
+
+
 class TestTransactionFilters:
     @pytest.mark.asyncio
     async def test_filter_uncategorized(self, client, db):

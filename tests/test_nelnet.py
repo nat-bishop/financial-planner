@@ -74,7 +74,7 @@ class TestToProviderAccounts:
         a = accounts[0]
         assert a.name == "Nelnet Group: AA - DIRECT SUB"
         assert a.currency == "USD"
-        assert a.balance_current == 349045
+        assert a.balance_current == -349045
         assert a.account_type == "loan/student"
         assert len(a.id) == 16  # sha256 hex truncated
 

@@ -7,6 +7,7 @@ from typing import TypeVar
 
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError, ClientError
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import (
@@ -56,19 +57,19 @@ class GeminiClient:
         Retries on validation failure up to max_retries times.
         """
         last_error: Exception | None = None
-        for _attempt in range(max_retries):
-            response = await self._client.aio.models.generate_content(
-                model=model or self._model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    response_mime_type="application/json",
-                    response_schema=response_model,
-                    temperature=self._temperature,
-                    max_output_tokens=self._max_tokens,
-                ),
-            )
+        for attempt in range(max_retries):
             try:
+                response = await self._client.aio.models.generate_content(
+                    model=model or self._model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        response_mime_type="application/json",
+                        response_schema=response_model,
+                        temperature=self._temperature,
+                        max_output_tokens=self._max_tokens,
+                    ),
+                )
                 if response.text is None:
                     raise RuntimeError("Gemini returned empty response")
                 return response_model.model_validate_json(response.text)
@@ -76,8 +77,22 @@ class GeminiClient:
                 last_error = e
                 log.warning("Structured output validation failed, retrying: %s", e)
                 continue
+            except ClientError as e:
+                # 4xx errors (auth, rate limit, bad request) won't succeed on retry
+                log.error("Gemini API client error: %s", e)
+                raise RuntimeError(f"Gemini API error: {e}") from e
+            except (APIError, Exception) as e:
+                # 5xx / network errors — retryable
+                last_error = e
+                log.warning(
+                    "Gemini API call failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                )
+                continue
         raise RuntimeError(
-            f"Structured output failed after {max_retries} retries: {last_error}"
+            f"Gemini API failed after {max_retries} retries: {last_error}"
         )
 
 
