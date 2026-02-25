@@ -531,16 +531,28 @@ def _to_provider_accounts(
     scraped: list[NelnetAccountData],
 ) -> list[ProviderAccount]:
     """Transform scraped loan group data to ProviderAccount list."""
-    return [
-        ProviderAccount(
-            id=_stable_id("nelnet", "account", a.group_name),
-            name=f"Nelnet {a.group_name} - {a.loan_type}",
-            currency="USD",
-            balance_current=-abs(_parse_currency(a.outstanding_balance)),
-            account_type="loan/student",
+    accounts = []
+    for a in scraped:
+        raw_cents = _parse_currency(a.outstanding_balance)
+        balance = -abs(raw_cents)
+        log.info(
+            "Nelnet account %s (%s): raw=%r parsed=%d cents, final=%d",
+            a.group_name,
+            a.loan_type,
+            a.outstanding_balance,
+            raw_cents,
+            balance,
         )
-        for a in scraped
-    ]
+        accounts.append(
+            ProviderAccount(
+                id=_stable_id("nelnet", "account", a.group_name),
+                name=f"Nelnet {a.group_name} - {a.loan_type}",
+                currency="USD",
+                balance_current=balance,
+                account_type="loan/student",
+            )
+        )
+    return accounts
 
 
 def _to_provider_transactions(

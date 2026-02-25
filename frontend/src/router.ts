@@ -20,9 +20,9 @@ export const router = createRouter({
       component: () => import('./views/AccountsView.vue'),
     },
     {
-      path: '/projection',
-      name: 'projection',
-      component: () => import('./views/ProjectionView.vue'),
+      path: '/stats',
+      name: 'stats',
+      component: () => import('./views/StatsView.vue'),
     },
     {
       path: '/settings',

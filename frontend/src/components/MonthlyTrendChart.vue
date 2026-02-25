@@ -42,7 +42,7 @@ const chartData = computed(() => {
       {
         label: 'Income',
         data: data.value.months.map(m => m.income / 100),
-        backgroundColor: '#00d68f',
+        backgroundColor: '#10b981',
         borderRadius: 4,
         borderSkipped: false,
         barPercentage: 0.8,
@@ -51,7 +51,7 @@ const chartData = computed(() => {
       {
         label: 'Expenses',
         data: data.value.months.map(m => m.expenses / 100),
-        backgroundColor: '#ff4d4d',
+        backgroundColor: '#ef4444',
         borderRadius: 4,
         borderSkipped: false,
         barPercentage: 0.8,
@@ -67,7 +67,7 @@ const chartOptions = {
   plugins: {
     legend: { display: false },
     tooltip: {
-      backgroundColor: '#0a0a0a',
+      backgroundColor: '#1e293b',
       titleFont: { family: 'DM Mono', size: 11 },
       bodyFont: { family: 'DM Mono', size: 11 },
       padding: 10,
@@ -83,7 +83,7 @@ const chartOptions = {
       border: { display: false },
       ticks: {
         font: { family: 'DM Mono', size: 10 },
-        color: '#777777',
+        color: '#64748b',
       },
     },
     y: {
@@ -91,7 +91,7 @@ const chartOptions = {
       border: { display: false },
       ticks: {
         font: { family: 'DM Mono', size: 10 },
-        color: '#777777',
+        color: '#64748b',
         callback: (val: any) => `$${(val as number).toLocaleString()}`,
       },
     },

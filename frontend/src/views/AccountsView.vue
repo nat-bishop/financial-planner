@@ -72,7 +72,7 @@ onMounted(async () => {
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
           <rect x="4" y="8" width="24" height="18" rx="3" stroke="#555" stroke-width="1.5"/>
           <path d="M4 13h24" stroke="#555" stroke-width="1.5"/>
-          <circle cx="22" cy="20" r="2" fill="#c8ff00"/>
+          <circle cx="22" cy="20" r="2" fill="#0d9488"/>
         </svg>
       </div>
       <h2 class="font-display text-2xl text-surface-200 mb-2">No accounts yet</h2>

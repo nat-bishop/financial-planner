@@ -3,8 +3,13 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Category, Transaction
-from app.schemas import CategoryCreate, CategoryResponse, CategoryUpdate
+from app.models import Account, Category, CategoryMemory, Transaction
+from app.schemas import (
+    CategoryCreate,
+    CategoryMemoryResponse,
+    CategoryResponse,
+    CategoryUpdate,
+)
 
 router = APIRouter()
 
@@ -79,4 +84,41 @@ async def delete_category(
     )
 
     await db.delete(category)
+    return {"status": "deleted"}
+
+
+@router.get("/memory", response_model=list[CategoryMemoryResponse])
+async def list_category_memory(
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """List all category memory rules with account names."""
+    query = (
+        select(CategoryMemory, Account.name.label("account_name"))
+        .outerjoin(Account, CategoryMemory.account_id == Account.id)
+        .order_by(CategoryMemory.category, CategoryMemory.normalized_pattern)
+    )
+    rows = (await db.execute(query)).all()
+    return [
+        {
+            "id": mem.id,
+            "normalized_pattern": mem.normalized_pattern,
+            "account_id": mem.account_id,
+            "account_name": acct_name,
+            "category": mem.category,
+            "created_at": mem.created_at,
+        }
+        for mem, acct_name in rows
+    ]
+
+
+@router.delete("/memory/{memory_id}")
+async def delete_category_memory(
+    memory_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Delete a single category memory rule."""
+    entry = await db.get(CategoryMemory, memory_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Memory rule not found")
+    await db.delete(entry)
     return {"status": "deleted"}

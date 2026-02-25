@@ -7,7 +7,7 @@ const links = [
   { to: '/', label: 'Overview', icon: 'grid' },
   { to: '/transactions', label: 'Transactions', icon: 'list' },
   { to: '/accounts', label: 'Accounts', icon: 'wallet' },
-  { to: '/projection', label: 'Projection', icon: 'trending' },
+  { to: '/stats', label: 'Stats', icon: 'trending' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -30,7 +30,7 @@ const currentTime = new Date().toLocaleDateString('en-US', {
       <div class="flex items-center gap-3 mb-1">
         <div class="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2 4h12M2 8h8M2 12h10" stroke="#0a0a0a" stroke-width="2" stroke-linecap="round"/>
+            <path d="M2 4h12M2 8h8M2 12h10" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </div>
         <span class="font-display text-xl text-surface-900 tracking-tight">Finance</span>

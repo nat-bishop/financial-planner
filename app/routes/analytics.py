@@ -9,12 +9,20 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Category, Transaction, UserSetting, exclude_disabled_accounts
+from app.models import (
+    Account,
+    Category,
+    Transaction,
+    UserSetting,
+    exclude_disabled_accounts,
+)
 from app.schemas import (
     IncomeProjectionResponse,
     IncomeSource,
     MonthlyBucket,
     MonthlyTrendResponse,
+    NetWorthHistoryResponse,
+    NetWorthPoint,
     ProjectionBand,
     ProjectionPoint,
     RecurringBill,
@@ -188,6 +196,92 @@ async def recurring_bills(
     )
     bills = [RecurringBill(**asdict(p)) for p in patterns]
     return RecurringBillsResponse(bills=bills, lookback_months=lookback_months)
+
+
+@router.get("/net-worth-history", response_model=NetWorthHistoryResponse)
+async def net_worth_history(
+    months_back: int = Query(default=24, ge=1, le=60),
+    months_forward: int = Query(default=12, ge=0, le=36),
+    db: AsyncSession = Depends(get_db),
+) -> NetWorthHistoryResponse:
+    """Compute net worth history by walking backwards from current balance.
+
+    Also projects forward using recent average monthly net.
+    """
+    # Current total balance across enabled accounts
+    result = await db.execute(
+        select(func.sum(Account.balance_current)).where(
+            Account.is_disabled == False  # noqa: E712
+        )
+    )
+    current_balance = result.scalar() or 0
+
+    # Get monthly trend data for lookback period
+    trend_resp = await monthly_trend(months=months_back, include_excluded=False, db=db)
+    trend_months = trend_resp.months
+
+    # Build historical points by walking backwards from current balance
+    # Start from current month and go back
+    now_ts = int(time.time())
+    now_year, now_month = time.gmtime(now_ts).tm_year, time.gmtime(now_ts).tm_mon
+    current_month_str = f"{now_year}-{now_month:02d}"
+
+    historical: list[NetWorthPoint] = []
+    running_balance = current_balance
+
+    # Create a lookup of net by month
+    net_by_month: dict[str, int] = {}
+    for bucket in trend_months:
+        net_by_month[bucket.month] = bucket.net
+
+    # Current month first
+    historical.append(NetWorthPoint(month=current_month_str, balance=running_balance))
+
+    # Walk backwards
+    year, month = now_year, now_month
+    for _ in range(months_back):
+        # Go to previous month
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+        month_str = f"{year}-{month:02d}"
+        net = net_by_month.get(month_str, 0)
+        # Previous balance = current - net for that month
+        running_balance -= net
+        historical.append(NetWorthPoint(month=month_str, balance=running_balance))
+
+    historical.reverse()
+    today_index = len(historical) - 1
+
+    # Monthly averages from last 3 months for projection
+    monthly_income = await _avg_monthly_amount(db, positive=True, months=3)
+    monthly_expenses = await _avg_monthly_amount(db, positive=False, months=3)
+    monthly_net = monthly_income - monthly_expenses
+
+    # Project forward
+    projected_balance = current_balance
+    year, month = now_year, now_month
+    for _ in range(months_forward):
+        month += 1
+        if month == 13:
+            month = 1
+            year += 1
+        projected_balance += monthly_net
+        historical.append(
+            NetWorthPoint(
+                month=f"{year}-{month:02d}",
+                balance=projected_balance,
+            )
+        )
+
+    return NetWorthHistoryResponse(
+        points=historical,
+        today_index=today_index,
+        monthly_income=monthly_income,
+        monthly_expenses=monthly_expenses,
+        monthly_net=monthly_net,
+    )
 
 
 def _compute_projection(

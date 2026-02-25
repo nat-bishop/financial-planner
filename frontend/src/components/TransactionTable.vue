@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useAccountsStore } from '../stores/accounts'
 import type { Transaction, TransactionUpdate } from '../types'
 import { formatCurrency, formatDate } from '../composables/useApi'
+import CategorySelector from './CategorySelector.vue'
 
 const props = defineProps<{
   transactions: Transaction[]
@@ -250,10 +251,7 @@ function parsedExtra(tx: Transaction): Record<string, string> | null {
                   <div class="grid gap-4">
                   <div>
                     <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Category</label>
-                    <input
-                      v-model="editCategory"
-                      class="text-xs px-2 py-1.5 bg-white border border-surface-900/10 rounded-md w-full outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
-                    />
+                    <CategorySelector v-model="editCategory" />
                   </div>
                   <div>
                     <label class="text-[10px] font-mono uppercase tracking-wider text-surface-400 block mb-1">Notes</label>

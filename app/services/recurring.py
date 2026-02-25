@@ -18,9 +18,9 @@ from app.models import (
 
 # Maps (min_days, max_days) ranges to frequency names
 _FREQUENCY_RANGES: list[tuple[int, int, str]] = [
-    (6, 8, "weekly"),
-    (13, 16, "biweekly"),
-    (27, 33, "monthly"),
+    (5, 9, "weekly"),
+    (12, 17, "biweekly"),
+    (25, 35, "monthly"),
     (55, 65, "bimonthly"),
     (85, 95, "quarterly"),
     (170, 195, "semiannual"),
@@ -29,13 +29,15 @@ _FREQUENCY_RANGES: list[tuple[int, int, str]] = [
 
 _MAX_STD_DEV: dict[str, float] = {
     "weekly": 2,
-    "biweekly": 3,
-    "monthly": 5,
+    "biweekly": 4,
+    "monthly": 7,
     "bimonthly": 7,
     "quarterly": 10,
     "semiannual": 15,
     "annual": 20,
 }
+
+_MIN_OCCURRENCES = 2
 
 
 def _classify_frequency(median_days: float) -> str | None:
@@ -106,7 +108,7 @@ async def detect_recurring(
     patterns: list[RecurringPattern] = []
 
     for (norm_desc, acct_id), txns in groups.items():
-        if len(txns) < 3:
+        if len(txns) < _MIN_OCCURRENCES:
             continue
 
         # Compute intervals between consecutive transactions
@@ -133,12 +135,14 @@ async def detect_recurring(
         if std_dev > _MAX_STD_DEV.get(frequency, 5):
             continue
 
-        # Compute confidence
+        # Compute confidence (cap at 0.5 for 2-occurrence patterns)
         confidence = (
             max(0.0, min(1.0, 1.0 - (std_dev / median_interval)))
             if median_interval > 0
             else 0.0
         )
+        if len(txns) == 2:
+            confidence = min(confidence, 0.5)
 
         # Predict next occurrence
         last_ts = timestamps[-1]

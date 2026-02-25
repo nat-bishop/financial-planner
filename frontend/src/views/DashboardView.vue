@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useAccountsStore } from '../stores/accounts'
 import { useSyncStore } from '../stores/sync'
 import AccountCard from '../components/AccountCard.vue'
@@ -11,6 +11,18 @@ import { formatCurrency, formatRelative } from '../composables/useApi'
 
 const accountsStore = useAccountsStore()
 const syncStore = useSyncStore()
+
+const totalAssets = computed(() =>
+  accountsStore.accounts
+    .filter(a => (a.balance_current ?? 0) > 0)
+    .reduce((sum, a) => sum + (a.balance_current ?? 0), 0)
+)
+
+const totalLiabilities = computed(() =>
+  accountsStore.accounts
+    .filter(a => (a.balance_current ?? 0) < 0)
+    .reduce((sum, a) => sum + Math.abs(a.balance_current ?? 0), 0)
+)
 
 onMounted(async () => {
   await Promise.all([
@@ -44,9 +56,13 @@ onMounted(async () => {
       class="bg-surface-0 rounded-2xl p-8 mb-8 border border-surface-200/50"
     >
       <p class="text-xs font-mono uppercase tracking-widest text-surface-500 mb-3">Total Balance</p>
-      <p class="font-display text-5xl text-surface-900 tracking-tight leading-none">
+      <p class="font-display text-5xl text-surface-900 tracking-tight leading-none mb-3">
         {{ formatCurrency(accountsStore.totalBalance()) }}
       </p>
+      <div v-if="totalAssets > 0 || totalLiabilities > 0" class="flex items-center gap-4 text-xs font-mono">
+        <span class="text-surface-400">Assets: <span class="text-income">{{ formatCurrency(totalAssets) }}</span></span>
+        <span v-if="totalLiabilities > 0" class="text-surface-400">Liabilities: <span class="text-expense">{{ formatCurrency(-totalLiabilities) }}</span></span>
+      </div>
     </div>
 
     <!-- Accounts row -->
@@ -113,7 +129,7 @@ onMounted(async () => {
     >
       <div class="w-16 h-16 mx-auto mb-6 bg-surface-0 rounded-2xl flex items-center justify-center">
         <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-          <path d="M14 7v14M7 14h14" stroke="#c8ff00" stroke-width="2" stroke-linecap="round"/>
+          <path d="M14 7v14M7 14h14" stroke="#0d9488" stroke-width="2" stroke-linecap="round"/>
         </svg>
       </div>
       <h2 class="font-display text-2xl text-surface-200 mb-2">No accounts connected</h2>

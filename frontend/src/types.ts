@@ -124,6 +124,19 @@ export interface IncomeProjectionResponse {
   is_configured: boolean
 }
 
+export interface NetWorthPoint {
+  month: string
+  balance: number
+}
+
+export interface NetWorthHistoryResponse {
+  points: NetWorthPoint[]
+  today_index: number
+  monthly_income: number
+  monthly_expenses: number
+  monthly_net: number
+}
+
 export interface RecurringBill {
   description: string
   raw_description: string

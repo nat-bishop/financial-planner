@@ -57,8 +57,8 @@ class TestRecurringDetection:
         assert patterns[0].frequency == "biweekly"
 
     @pytest.mark.asyncio
-    async def test_reject_too_few_occurrences(self, db):
-        """Does not detect patterns with fewer than 3 occurrences."""
+    async def test_detect_two_occurrences_with_capped_confidence(self, db):
+        """Detects 2-occurrence patterns but caps confidence at 0.5."""
         db.add(Account(id="act_1", provider="simplefin", name="Chase"))
         base = int(time.time()) - (60 * 86400)
         for i in range(2):
@@ -71,6 +71,27 @@ class TestRecurringDetection:
                     description="RARE PAYMENT",
                 )
             )
+        await db.commit()
+
+        patterns = await detect_recurring(db, lookback_months=12, direction="expense")
+        assert len(patterns) == 1
+        assert patterns[0].occurrence_count == 2
+        assert patterns[0].confidence <= 0.5
+
+    @pytest.mark.asyncio
+    async def test_reject_single_occurrence(self, db):
+        """Does not detect patterns with only 1 occurrence."""
+        db.add(Account(id="act_1", provider="simplefin", name="Chase"))
+        base = int(time.time()) - (30 * 86400)
+        db.add(
+            Transaction(
+                account_id="act_1",
+                external_id="tx_0",
+                posted_at=base,
+                amount=-5000,
+                description="ONE TIME PAYMENT",
+            )
+        )
         await db.commit()
 
         patterns = await detect_recurring(db, lookback_months=12, direction="expense")

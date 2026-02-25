@@ -5,25 +5,25 @@
   --font-body: 'DM Sans', sans-serif;
   --font-mono: 'DM Mono', monospace;
 
-  --color-surface-0: #0a0a0a;
-  --color-surface-50: #111111;
-  --color-surface-100: #1a1a1a;
-  --color-surface-200: #2a2a2a;
-  --color-surface-300: #3a3a3a;
-  --color-surface-400: #555555;
-  --color-surface-500: #777777;
-  --color-surface-600: #999999;
-  --color-surface-700: #bbbbbb;
-  --color-surface-800: #dddddd;
-  --color-surface-900: #f0f0f0;
-  --color-surface-950: #fafafa;
+  --color-surface-0: #0f172a;
+  --color-surface-50: #1e293b;
+  --color-surface-100: #1e293b;
+  --color-surface-200: #334155;
+  --color-surface-300: #475569;
+  --color-surface-400: #64748b;
+  --color-surface-500: #94a3b8;
+  --color-surface-600: #cbd5e1;
+  --color-surface-700: #e2e8f0;
+  --color-surface-800: #f1f5f9;
+  --color-surface-900: #f8fafc;
+  --color-surface-950: #ffffff;
 
-  --color-accent: #c8ff00;
-  --color-accent-dim: #8ab300;
-  --color-expense: #ff4d4d;
-  --color-income: #00d68f;
-  --color-pending: #ffb84d;
-  --color-info: #4da6ff;
+  --color-accent: #0d9488;
+  --color-accent-dim: #0f766e;
+  --color-expense: #ef4444;
+  --color-income: #10b981;
+  --color-pending: #f59e0b;
+  --color-info: #3b82f6;
 }
 
 * {

@@ -184,6 +184,19 @@ class IncomeProjectionResponse(BaseModel):
     is_configured: bool
 
 
+class NetWorthPoint(BaseModel):
+    month: str  # "2025-03"
+    balance: int  # cents
+
+
+class NetWorthHistoryResponse(BaseModel):
+    points: list[NetWorthPoint]
+    today_index: int
+    monthly_income: int  # cents
+    monthly_expenses: int  # cents
+    monthly_net: int  # cents
+
+
 class RecurringBill(BaseModel):
     description: str
     raw_description: str
@@ -248,6 +261,18 @@ class CategoryResponse(BaseModel):
     description: str | None
     is_default: bool
     exclude_from_totals: bool
+    created_at: int
+
+
+# Category Memory
+class CategoryMemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    normalized_pattern: str
+    account_id: str
+    account_name: str | None = None
+    category: str
     created_at: int
 
 

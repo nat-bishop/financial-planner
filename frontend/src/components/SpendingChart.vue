@@ -37,14 +37,14 @@ const chartData = computed(() => {
     datasets: [{
       data: cats.map(c => c.total / 100),
       backgroundColor: [
-        '#c8ff00',
-        '#ff4d4d',
-        '#4da6ff',
-        '#ffb84d',
-        '#00d68f',
-        '#b084ff',
-        '#ff84b0',
-        '#84d9ff',
+        '#0d9488',
+        '#ef4444',
+        '#3b82f6',
+        '#f59e0b',
+        '#10b981',
+        '#8b5cf6',
+        '#ec4899',
+        '#06b6d4',
       ],
       borderRadius: 6,
       borderSkipped: false,
@@ -60,7 +60,7 @@ const chartOptions = {
   plugins: {
     legend: { display: false },
     tooltip: {
-      backgroundColor: '#0a0a0a',
+      backgroundColor: '#1e293b',
       titleFont: { family: 'DM Mono', size: 11 },
       bodyFont: { family: 'DM Mono', size: 11 },
       padding: 10,
@@ -80,7 +80,7 @@ const chartOptions = {
       border: { display: false },
       ticks: {
         font: { family: 'DM Sans', size: 12 },
-        color: '#777777',
+        color: '#64748b',
         padding: 8,
       },
     },

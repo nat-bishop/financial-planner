@@ -314,6 +314,21 @@ async def _run_sync(
             log.warning("%s error: %s", provider.provider_name, err)
         sync_log.error_message = "; ".join(result.errors)
 
+    # Log received data
+    log.info(
+        "Provider %s returned %d accounts, %d transactions",
+        provider.provider_name,
+        len(result.accounts),
+        len(result.transactions),
+    )
+    for acct in result.accounts:
+        log.info(
+            "  Account: %s | type=%s | balance=%s",
+            acct.name,
+            acct.account_type,
+            acct.balance_current,
+        )
+
     # Upsert accounts and transactions
     accounts_synced = set()
     transactions_added = 0
