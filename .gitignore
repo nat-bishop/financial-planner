@@ -46,6 +46,7 @@ data/
 htmlcov/
 .playwright-mcp/
 *.png
+!screenshot.png
 
 # Frontend
 node_modules/
